@@ -25,11 +25,11 @@
   )
 
 (defstruct (patch
-            (:constructor %make-patch (faces hull &optional compactness))
+            (:constructor %make-patch (faces &optional hull compactness links))
             (:copier NIL)
             (:predicate NIL))
   (faces #() :type (simple-array (unsigned-byte 32) (*)))
-  (hull NIL :type convex-hull)
+  (hull NIL :type (or null convex-hull))
   (links (make-array 0 :adjustable T :fill-pointer T) :type vector)
   (compactness 0.0d0 :type double-float))
 
@@ -58,6 +58,9 @@
           (setf (patch-compactness patch) (compute-compactness patch))
           patch)))))
 
+(defun make-patch (a b c)
+  (%make-patch (make-array 3 :element-type '(unsigned-byte 32) :initial-contents (list a b c))))
+
 (defstruct (patch-link
             (:constructor %make-patch-link (a b &optional merge-cost merge-result))
             (:copier NIL)
@@ -73,6 +76,13 @@
         (%make-patch-link a b (/ (patch-compactness result)) result)
         (%make-patch-link a b))))
 
+(defun link-patches (a b)
+  (unless (loop for link in (patch-links a)
+                thereis (or (eql b (patch-link-a link)) (eql b (patch-link-b link))))
+    (let ((link (make-patch-link a b)))
+      (vector-push-extend link (patch-links a))
+      (vector-push-extend link (patch-links b)))))
+
 (defun merge-patches (link)
   (let ((patch (patch-link-merge-result link)))
     ;; Now that we actually merge this in, compute new links and update the existing neighbour's links.
@@ -87,9 +97,52 @@
       (link (patch-link-b link) (patch-link-a link))
       patch)))
 
+(defun next-link (links)
+  (loop with min = most-positive-double-float
+        with min-link = NIL
+        for link being the hash-keys of links
+        do (when (<= (patch-link-cost link) min)
+             (setf min (patch-link-cost link))
+             (setf min-link link))
+        finally (return min-link)))
+
 (defun decompose (vertices indices)
-  ;; 1. Destructure the mesh into one patch per face
-  ;; 2. Find neighbouring patches and create the links
-  ;; 3. Greedily merge patches according to merge cost
-  ;; 4. Return the patches' convex hulls
-  )
+  ;; FIXME: This is all really dumb and uses really bad data structures
+  ;;        Could definitely be optimised a lot by someone smarter
+  (let ((patchlist (make-array (truncate (length indices) 3)))
+        (patches (make-hash-table :test 'eq))
+        (links (make-hash-table :test 'eq))
+        (i 0))
+    ;; 1. Destructure the mesh into one patch per face
+    (manifolds:do-faces (a b c indices)
+      (setf (gethash patch patches) T)
+      (setf (aref patchlist i) (make-patch a b c))
+      (incf i))
+    ;; 2. Find neighbouring patches and create the links
+    (let ((adjacents (manifolds:face-adjacency-list indices)))
+      (dotimes (face (length adjacents))
+        (loop for other in (aref adjacents face)
+              do (link-patches (aref patchlist face) (aref patchlist other)))))
+    ;; 3. Greedily merge patches according to merge cost
+    (loop for link = (next-link links)
+          while (patch-link-merge-result link)
+          do ;; 1. Remove old links
+          (remhash link links)
+          (remhash (patch-link-a patch) patches)
+          (remhash (patch-link-b patch) patches)
+          (loop for link across (patch-links (patch-link-b patch))
+                do (remhash link links))
+          (loop for link across (patch-links (patch-link-a patch))
+                do (remhash link links))
+          ;; 2. Merge the patches
+          (let ((patch (merge-patches link)))
+            ;; 3. Insert the new links
+            (setf (gethash patch patches) T)
+            (loop for link across (patch-links patch)
+                  do (setf (gethash link links) T))))
+    ;; 4. Return the patches' convex hulls
+    (let ((hulls (make-array (hash-table-count patches))))
+      (loop for patch being the hash-keys of patches
+            for i from 0
+            do (setf (aref hulls i) (patch-hull patch)))
+      hulls)))
