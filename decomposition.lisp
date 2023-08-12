@@ -5,8 +5,27 @@
 
 (in-package #:org.shirakumo.fraf.convex-covering)
 
+(defstruct (convex-hull
+            (:constructor make-convex-hull (vertices faces))
+            (:copier NIL)
+            (:predicate NIL))
+  (vertices  #() :type (simple-array double-float (*)))
+  (faces #() :type (simple-array (unsigned-byte 32) (*))))
+
+(defun find-vertex-in-hull (hull)
+  )
+
+(defun find-edge-in-hull (hull)
+  )
+
+(defun find-boundary-constraint-bar (hull)
+  )
+
+(defun find-negative-side-touching-triangle (hull)
+  )
+
 (defstruct (patch
-            (:constructor (%make-patch (faces hull &optional compactness)))
+            (:constructor %make-patch (faces hull &optional compactness))
             (:copier NIL)
             (:predicate NIL))
   (faces #() :type (simple-array (unsigned-byte 32) (*)))
@@ -14,21 +33,20 @@
   (links (make-array 0 :adjustable T :fill-pointer T) :type vector)
   (compactness 0.0d0 :type double-float))
 
-(defstruct (patch-link
-            (:constructor (%make-patch-link (a b &optional merge-cost merge-result)))
-            (:copier NIL)
-            (:predicate NIL))
-  (a NIL :type patch)
-  (b NIL :type patch)
-  (merge-cost most-positive-double-float :type double-float)
-  (merge-result NIL :type (or null patch)))
+(defun normals-matching-p (patch hull)
+  )
+
+(defun valid-patch-p (patch)
+  (let ((hull (patch-hull patch)))
+    (and (not (find-vertex-in-hull hull))
+         (not (find-edge-in-hull hull))
+         (normals-matching-p patch hull)
+         (not (find-boundary-constraint-bar hull))
+         (not (find-negative-side-touching-triangle hull)))))
 
 (defun compute-compactness (patch)
   (/ (sqrt (surface-area ... (patch-faces patch)))
      (boundary-length ... (patch-faces patch))))
-
-(defun valid-patch-p (patch)
-  )
 
 (defun make-merged-patch (a b)
   (let ((faces (make-array (+ (length (patch-faces a)) (length (patch-faces a))) :element-type '(unsigned-byte 32))))
@@ -39,6 +57,15 @@
         (when (valid-patch-p patch)
           (setf (patch-compactness patch) (compute-compactness patch))
           patch)))))
+
+(defstruct (patch-link
+            (:constructor %make-patch-link (a b &optional merge-cost merge-result))
+            (:copier NIL)
+            (:predicate NIL))
+  (a NIL :type patch)
+  (b NIL :type patch)
+  (merge-cost most-positive-double-float :type double-float)
+  (merge-result NIL :type (or null patch)))
 
 (defun make-patch-link (a b)
   (let ((result (make-merged-patch a b)))
