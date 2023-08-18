@@ -14,7 +14,6 @@
   :depends-on (:manifolds
                :3d-spaces
                :quickhull
-               :priority-queue
                :documentation-utils)
   :in-order-to ((asdf:test-op (asdf:test-op :convex-covering-test))))
 
