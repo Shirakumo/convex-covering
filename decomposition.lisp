@@ -7,10 +7,11 @@
 
 (defstruct (convex-hull
             (:constructor make-convex-hull (vertices faces))
+            (:conc-name NIL)
             (:copier NIL)
             (:predicate NIL))
-  (vertices  #() :type (simple-array double-float (*)))
-  (faces #() :type (simple-array (unsigned-byte 32) (*))))
+  (vertices  #() :type (manifolds:vertex-array double-float))
+  (faces #() :type manifolds:face-array))
 
 (defun find-vertex-in-hull (hull)
   )
@@ -28,7 +29,7 @@
             (:constructor %make-patch (faces &optional hull compactness links))
             (:copier NIL)
             (:predicate NIL))
-  (faces #() :type (simple-array (unsigned-byte 32) (*)))
+  (faces #() :type manifolds:face-array)
   (hull NIL :type (or null convex-hull))
   (links (make-array 0 :adjustable T :fill-pointer T) :type vector)
   (compactness 0.0d0 :type double-float))
@@ -106,7 +107,7 @@
              (setf min-link link))
         finally (return min-link)))
 
-(defun decompose (vertices indices)
+(defun decompose (vertices indices &key)
   ;; FIXME: This is all really dumb and uses really bad data structures
   ;;        Could definitely be optimised a lot by someone smarter
   (let ((patchlist (make-array (truncate (length indices) 3)))
