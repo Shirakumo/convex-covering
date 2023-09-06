@@ -10,6 +10,7 @@
   :source-control (:git "https://github.com/shirakumo/convex-covering.git")
   :serial T
   :components ((:file "package")
+               (:file "merging")
                (:file "decomposition")
                (:file "documentation"))
   :depends-on ("manifolds"
@@ -17,11 +18,6 @@
                "quickhull"
                "documentation-utils")
   :in-order-to ((asdf:test-op (asdf:test-op "convex-covering/test"))))
-
-(defsystem "convex-covering/debug"
-  :depends-on ("cl-dot"
-               "inferior-shell")
-  )
 
 (defsystem "convex-covering/test"
   :depends-on ("convex-covering"
@@ -31,3 +27,12 @@
   :perform (test-op (operation component)
                     (uiop:symbol-call "ORG.SHIRAKUMO.FRAF.CONVEX-COVERING.TEST"
                                       '#:decompose-test-files)))
+
+(defsystem "convex-covering/debug"
+  :depends-on ("alexandria"
+               "cl-dot"
+               "inferior-shell"
+
+               "convex-covering"
+               "convex-covering/test")
+  :components ((:file "debug")))
