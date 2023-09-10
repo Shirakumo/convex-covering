@@ -5,7 +5,6 @@
 
 (in-package #:org.shirakumo.fraf.convex-covering)
 
-
 ;;; Vertex index
 ;;;
 ;;; Lookup index in global vertex array given the vertex coordinates.
@@ -31,7 +30,6 @@
 
 ;;;
 
-;; TODO cache face normals in this structure?
 (defstruct (convex-hull
             (:constructor %make-convex-hull (vertices faces global-faces))
             (:conc-name NIL)
@@ -41,7 +39,7 @@
   (faces    #() :type manifolds:face-array)
   (face-normals '()) ; TODO facet normals
   ;; Maybe essential
-  (global-faces    #() :type manifolds:face-array)
+  (global-faces #() :type manifolds:face-array)
   ;; Debugging
   (annotations '() :type list)
   (problem     nil))
@@ -103,24 +101,12 @@
                   (assert (loop :for k :below (/ (length all-vertices) 3)
                                 :for v = (manifolds:v all-vertices k)
                                 :thereis (v= v (dvec x y z))))
-                  #+no (setf (aref vertices (+ (* 3 i) 0)) (aref all-vertices (+ (* 3 j) 0))
-                             (aref vertices (+ (* 3 i) 1)) (aref all-vertices (+ (* 3 j) 1))
-                             (aref vertices (+ (* 3 i) 2)) (aref all-vertices (+ (* 3 j) 2)))
                   (vector-push-extend x vertices)
                   (vector-push-extend y vertices)
-                  (vector-push-extend z vertices)
-
-
-                  ; (vector-push-extend b global-faces)
-                  ; (vector-push-extend c global-faces)
-                  )
+                  (vector-push-extend z vertices))
                 (vector-push-extend j global-faces)))
-    #+no (map-into vertices (lambda (index)
-                              (aref all-vertices index)))
     (multiple-value-call #'make-convex-hull
       (org.shirakumo.fraf.quickhull:convex-hull vertices)
-      #+no (make-array (length global-faces) :element-type (array-element-type global-faces)
-                                        :initial-contents global-faces)
       vertex-index)))
 
 (defun push-link (new-link patch)
@@ -150,11 +136,6 @@
     (replace faces faces2 :start1 (length faces1))
     (let* ((hull (compute-patch-convex-hull all-vertices faces vertex-index))
            (patch (%make-patch faces surface-area hull)))
-      #+no (when (not (valid-patch-p patch all-vertices all-faces))
-        (org.shirakumo.fraf.convex-covering.test::export-hulls
-         (vector hull) "/tmp/problem.obj")
-        (break))
-
       (cond ((valid-patch-p patch all-vertices all-faces)
              (setf (patch-compactness patch) (compute-compactness all-vertices patch))
              patch)
@@ -187,15 +168,10 @@
       (setf surface-area (manifolds:surface-area all-vertices faces)))
     (let* ((hull (compute-patch-convex-hull all-vertices faces vertex-index))
            (patch (%make-patch faces surface-area hull)))
-      #+no (when (not (valid-patch-p patch all-vertices all-faces))
-             (org.shirakumo.fraf.convex-covering.test::export-hulls
-              (vector hull) "/tmp/problem.obj")
-             (break))
-
       (cond ((valid-patch-p patch all-vertices all-faces)
              (setf (patch-compactness patch) (compute-compactness all-vertices patch))
              patch)
-            (t
+            (t ; TODO for debugging
              hull)))))
 
 (defstruct (patch-link
@@ -272,12 +248,6 @@
         with min-link = NIL
         for link being the hash-keys of links
         for cost = (patch-link-merge-cost link)
-        #+no :do #+no (format *trace-output* "?? ~5,2F ~{[~D ~D ~D]~^ ~}/~A~%  -- ~{[~D ~D ~D]~^ ~}/~A~%"
-                    cost
-                    (coerce (patch-faces (patch-link-a link)) 'list)
-                    (manifolds:boundary-list (patch-faces (patch-link-a link)))
-                    (coerce (patch-faces (patch-link-b link)) 'list)
-                    (manifolds:boundary-list (patch-faces (patch-link-b link))))
         do (when (< cost min)
              (setf min (patch-link-merge-cost link))
              (setf min-link link))
