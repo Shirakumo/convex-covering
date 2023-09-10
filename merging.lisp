@@ -95,30 +95,36 @@
                                         ; (vc (manifolds:v all-vertices c))
                          )
                      (flet ((edge-in-hull-p (vi1 vi2)
-                              (and (not (let ((result (loop :for i :below (length hull-faces/global) :by 3
-                                                            :thereis (and (find vi1 hull-faces/global :start i :end (+ i 3))
-                                                                          (find vi2 hull-faces/global :start i :end (+ i 3))))))
-                                          (when (and result *debug-visualizations*)
-                                            (debug-line* (manifolds:v all-vertices vi1)
-                                                         (manifolds:v all-vertices vi2)
-                                                         :boundary-edge
-                                                         hull :sample-count 13))
-                                          result))
-                                   (loop :with v1 = (manifolds:v all-vertices vi1)
-                                         :with v2 = (manifolds:v all-vertices vi2)
-                                         :with bad = nil
-                                         :with sample-count = 8
-                                         :repeat sample-count
-                                         :with d = (v/ (v- v2 v1) sample-count)
-                                         :for v = (v+ v1 (v* d (/ .5d0 sample-count))) :then (v+ v d)
-                                         :for in? = (vertex-in-hull-p v hull)
-                                         :when in?
-                                         :do (d  "; [~A ~A]~&;~2@T~A - ~A~&;~2@Tat ~A~%"
-                                                 vi1 vi2 v1 v2 v)
-                                             (setf bad t)
+                              (let ((v1 (manifolds:v all-vertices vi1))
+                                    (v2 (manifolds:v all-vertices vi2)))
+                                (or (vertex-in-hull-p v1 hull)
+                                    (vertex-in-hull-p v2 hull)
+                                    (vertex-in-hull-p (v* (v+ v1 v2) .5d0) hull)))
+
+                              #+old (and (not (let ((result (loop :for i :below (length hull-faces/global) :by 3
+                                                                  :thereis (and (find vi1 hull-faces/global :start i :end (+ i 3))
+                                                                                (find vi2 hull-faces/global :start i :end (+ i 3))))))
+                                                (when (and result *debug-visualizations*)
+                                                  (debug-line* (manifolds:v all-vertices vi1)
+                                                               (manifolds:v all-vertices vi2)
+                                                               :boundary-edge
+                                                               hull :sample-count 13))
+                                                result))
+                                         (loop :with v1 = (manifolds:v all-vertices vi1)
+                                               :with v2 = (manifolds:v all-vertices vi2)
+                                               :with bad = nil
+                                               :with sample-count = 8
+                                               :repeat sample-count
+                                               :with d = (v/ (v- v2 v1) sample-count)
+                                               :for v = (v+ v1 (v* d (/ .5d0 sample-count))) :then (v+ v d)
+                                               :for in? = (vertex-in-hull-p v hull)
+                                               :when in?
+                                               :do (d  "; [~A ~A]~&;~2@T~A - ~A~&;~2@Tat ~A~%"
+                                                       vi1 vi2 v1 v2 v)
+                                                   (setf bad t)
                                         ; :do (push (cons v (if in? :bad :good)) (problem hull))
                                         ; :thereis (vertex-in-hull-p v hull all-vertices)
-                                         :finally (return bad)))))
+                                               :finally (return bad)))))
                        (or (edge-in-hull-p a b)
                            (edge-in-hull-p b c)
                            (edge-in-hull-p c a)))))
@@ -152,11 +158,11 @@
     #+old (or (face-matches-facet-p h1 h2 h3 v1 v2 v3)
               (and (not (face-shares-vertex-or-edge-with-facet-p h1 h2 h3 v1 v2 v3 :hull hull))
                    (triangles-intersect-p h1 h2 h3 v1 v2 v3 :threshold threshold)))
-    (or (face-matches-facet-p h1 h2 h3 v1 v2 v3)
-        (multiple-value-bind (intersectp constellation contact)
-            (triangles-intersect-p h1 h2 h3 v1 v2 v3 :threshold .0001)
-          (declare (ignore intersectp))
-          (and (eq constellation :coplanar) (eq contact :penetrating))))))
+    (or                    ; (face-matches-facet-p h1 h2 h3 v1 v2 v3)
+     (multiple-value-bind (intersectp constellation contact)
+         (triangles-intersect-p h1 h2 h3 v1 v2 v3 :threshold .0001)
+       (declare (ignore intersectp))
+       (and (eq constellation :coplanar) (eq contact :penetrating))))))
 
 (defun triangles-coplanar-and-intersect-p (u1 u2 u3 v1 v2 v3 &key threshold)
   (let* ((normal (vc (v- u2 u1) (v- u3 u1)))
@@ -175,8 +181,9 @@
                 (hull-faces (faces hull)))
             (when (not (loop :for i :below (/ (length hull-faces) 3)
                              :for (facet-centroid . facet-normal) :in (face-normals hull)
-                             :always (if (face-overlaps-or-matches-facet-p
-                                          hull-vertices hull-faces i a b c :hull hull)
+                             :always (if (and (< (abs (- -1 (v. face-normal (the dvec3 facet-normal)))) .0001)
+                                              (face-overlaps-or-matches-facet-p
+                                               hull-vertices hull-faces i a b c :hull hull))
                                          (let ( ; (*debug-output* t)
                                                )
                                            (d "[~A ~A ~A] possibly intersects facet ~A~%"
@@ -193,7 +200,7 @@
                                                 face-normal
                                                 facet-normal
                                                 (v. face-normal facet-normal))
-                                             (cond ((< (abs (- -1 (v. face-normal facet-normal))) .0001)
+                                             (cond (t ; (< (abs (- -1 (v. face-normal facet-normal))) .0001)
                                                     (when *debug-visualizations*
                                                       (debug-line facet-centroid face-normal :bad-normal hull)
                                                       (debug-line facet-centroid facet-normal :bad-normal hull))
