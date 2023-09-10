@@ -7,8 +7,13 @@
 (defvar *debug-visualizations* nil)
 
 (defun debug-visualizations-p (i)
-  (and *debug-visualizations*
-       (zerop (mod i *debug-visualizations*))))
+  (etypecase *debug-visualizations*
+    (null
+     nil)
+    (integer
+     (zerop (mod i *debug-visualizations*)))
+    (function
+     (funcall *debug-visualizations* i))))
 
 ;;; Debug output
 
@@ -31,6 +36,16 @@
   (let ((count (length colors)))
     (lambda (i)
       (aref colors (mod i count)))))
+
+(defun color<-faces (faces)
+  (flet ((face-value (index)
+           (let ((a (aref faces (+ (* 3 index) 0)))
+                 (b (aref faces (+ (* 3 index) 1)))
+                 (c (aref faces (+ (* 3 index) 2))))
+             (sxhash (logior (ash a 24) (ash b 12) c)))))
+    (let ((hash (reduce #'logxor (alexandria:iota (/ (min 9 (length faces)) 3))
+                        :key #'face-value)))
+      (aref *default-colors* (mod hash (length *default-colors*))))))
 
 ;;; Debug geometry
 
@@ -57,7 +72,9 @@
                    :attributes '(:position)
                    :material material)))
 
-(defun debug-line (from direction kind hull &key (sample-count 32))
+(defun debug-line (from direction kind hull &key (sample-count (case kind
+                                                                 (:boundary-edge 16)
+                                                                 (t 32))))
   (loop :with d = (v/ direction (float sample-count 1.0d0))
         :repeat sample-count
         :for v = from :then (v+ v d)
@@ -66,6 +83,21 @@
 (defun debug-line* (from to kind hull &rest args &key sample-count)
   (declare (ignore sample-count))
   (apply #'debug-line from (v- to from) kind hull args))
+
+(defun debug-face (a b c kind hull &key (sample-count (case kind
+                                                        (:boundary-edge 16)
+                                                        (t 32))))
+  (debug-line* a b kind hull :sample-count sample-count)
+  (debug-line* b c kind hull :sample-count sample-count)
+  (debug-line* c a kind hull :sample-count sample-count))
+
+(defun debug-face* (vertices faces face-index kind hull &key (sample-count (case kind
+                                                                             (:boundary-edge 16)
+                                                                             (t 32))))
+  (let ((a (manifolds:v vertices (+ (aref faces (+ (* 3 face-index) 0)))))
+        (b (manifolds:v vertices (+ (aref faces (+ (* 3 face-index) 1)))))
+        (c (manifolds:v vertices (+ (aref faces (+ (* 3 face-index) 2))))))
+    (debug-face a b c kind hull :sample-count sample-count)))
 
 ;;; Utilities
 
@@ -86,7 +118,9 @@
 (defmethod cl-dot:graph-object-node ((graph decomposition) (object patch))
   (let* ((index (position object (order graph)))
          (color (when index
-                  (funcall (colors graph) index)))
+                  (color<-faces (global-faces (patch-hull object)))
+                  ; (funcall (colors graph) index)
+                  ))
          (label (patch-debug-name object)))
     (make-instance 'cl-dot:node :attributes `(:label ,label
                                               :style :filled
@@ -129,20 +163,29 @@
 
 ;;; Render
 
+(defun render-wavefront (input-file output-file &key (camera-position (vec 25 24 25)))
+  (let ((camera-position (format nil "~A,~A,~A"
+                                 (vx camera-position)
+                                 (vy camera-position)
+                                 (vz camera-position))))
+    (inferior-shell:run `("f3d" "--output" ,output-file
+                                "--camera-position" ,camera-position
+                                ,input-file))))
+
 (defun render-step (patches i &key (output-file (debug-filename "hulls" i "png"))
-                                   (colors      (make-color-generator))
-                                   highlight)
+                                   colors
+                                   highlight
+                                   (camera-position (vec 25 24 25))
+                                   (alpha .5))
   (let ((hulls           (remove nil (map 'vector #'patch-hull patches)))
         (object-filename (debug-filename "hulls" i "obj")))
     (org.shirakumo.fraf.convex-covering.test::export-hulls
-     hulls object-filename :colors colors :highlight highlight)
-    (inferior-shell:run `("f3d" "--output" ,output-file
-                                "--camera-position" "5,4,5"
-                                ,object-filename))))
+     hulls object-filename :colors colors :alpha alpha :highlight highlight)
+    (render-wavefront object-filename output-file :camera-position camera-position)))
 
 ;;; Visualization
 
-(defun visualize-step (patches i &key highlight)
+(defun visualize-step (patches i &key highlight final)
   (when *debug-visualizations*
     (let ((patches (etypecase patches
                      (hash-table (alexandria:hash-table-keys patches))
@@ -152,7 +195,12 @@
             (step-filename  (debug-filename "step" i "png")))
         (when (< (length patches) 64)
           (graph-step patches i :output-file graph-filename))
-        (render-step patches i :output-file image-filename :highlight highlight)
+        (render-step patches i :output-file image-filename
+                               :highlight   highlight
+                               :colors      (when final
+                                              (make-color-generator))
+                               :alpha       nil #+no (unless final
+                                              .7))
         (when (< (length patches) 64)
           (inferior-shell:run `("montage" ,graph-filename ,image-filename
                                           "-tile" "2x1" "-geometry" "+0+0"
