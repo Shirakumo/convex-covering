@@ -24,6 +24,8 @@
 ;;; Intersections via Separating Axis Theorem
 
 (defun intervals-intersect-p (i1-min i1-max i2-min i2-max &key (threshold 1d-6))
+  (declare (type double-float i1-min i1-max i2-min i2-max)
+           (optimize (speed 3)))
   ;; case 1 | s1 e1 s2 e2
   ;; case 2 | s1 s2 e1 e2 *
   ;; case 3 | s1 s2 e2 e1 *
@@ -156,6 +158,7 @@
                    (block nil
                      (let ((contact-class :penetrating))
                        (flet ((test-axis (e1 e2)
+                                (declare (type dvec3 e1 e2))
                                 (let ((edge-normal (vunit (vc normal-u (v- e2 e1)))))
                                   (multiple-value-bind (separatingp class)
                                       (separating-axis-p edge-normal 0)

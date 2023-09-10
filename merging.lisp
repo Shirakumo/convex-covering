@@ -59,11 +59,12 @@
       (setf (face-normals hull) (compute-facet-normals hull))))
 
 (defun vertex-in-hull-p (vertex hull &key (eps -.001))
+  (declare (type dvec3 vertex))
   (loop :for (facet-centroid . facet-normal) :in (ensure-facet-normals hull) ; TODO rename face-normals -> %face-normals; ensure-face-normals -> face-normals
         :always
                                         ; (minusp (v. facet-normal (v- vertex facet-centroid)))
                                         ; (not (> (v. facet-normal (v- vertex facet-centroid)) .0001))
-           (< (v. facet-normal (v- vertex facet-centroid)) eps)))
+           (< (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid))) eps)))
 
 (defun find-vertex-in-hull (hull all-vertices all-faces)
   (let ((result (loop :with hull-faces = (global-faces hull)
@@ -165,9 +166,11 @@
 (defun normals-matching-p (patch hull all-vertices all-faces)
   (or (<= (length (vertices hull)) (* 3 4)) ; HACK to work around degenerate 2D case
       (manifolds:do-faces (ia ib ic all-faces t)
-        (let ((a (manifolds:v all-vertices ia))
-              (b (manifolds:v all-vertices ib))
-              (c (manifolds:v all-vertices ic)))
+        (let* ((a (manifolds:v all-vertices ia))
+               (b (manifolds:v all-vertices ib))
+               (c (manifolds:v all-vertices ic))
+               (face-normal (vunit (vc (v- b a) (v- c a)))))
+          (declare (type dvec3 a b c))
           (let ((hull-vertices (vertices hull))
                 (hull-faces (faces hull)))
             (when (not (loop :for i :below (/ (length hull-faces) 3)
@@ -178,7 +181,7 @@
                                                )
                                            (d "[~A ~A ~A] possibly intersects facet ~A~%"
                                               ia ib ic i)
-                                           (let ((face-normal (vunit (vc (v- b a) (v- c a)))))
+                                           (let ()
                                              (when *debug-visualizations*
                                                (debug-line* a b :face-edge hull)
                                                (debug-line* b c :face-edge hull)
