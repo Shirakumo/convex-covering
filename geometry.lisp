@@ -34,96 +34,52 @@
   ;; case 6 | s2 e2 s1 e1
   #+no (or (<= i1-min i2-min i1-max)
            (<= i2-min i1-min i2-max))
-  (cond ((<= (abs (- (min i1-min i2-min) (max i1-max i2-max))) threshold)
-         (values t :identical))
-        ((<= i1-min i2-min i1-max i2-max) ; case 2
-         (d "~4@TOverlap ~A~%"
-            (abs (- i2-min i1-max)))
-         (values t (if (< (abs (- i2-min i1-max)) threshold) :touching :penetrating)))
-        ((<= i1-min i2-min i2-max i1-max) ; case 3
-         (d "~4@TI₂ ⊂ I₁ (case 3) Overlaps ~A ~A~%"
-            (abs (- i1-min i2-min)) ; cases 3 4
-            (abs (- i1-max i2-max)) ; cases 3 4
-            )
-         (values t :penetrating
-                 #+no (if (< (min (abs (- i1-min i2-min)) (abs (- i1-max i2-max))) threshold)
-                       :touching
-                       :penetrating)))
-        ((<= i2-min i1-min i1-max i2-max) ; case 4
-         (d "~4@TI₁ ⊂ I₂ (case 4) Overlaps ~A ~A~%"
-            (abs (- i1-min i2-min)) ; cases 3 4
-            (abs (- i1-max i2-max)) ; cases 3 4
-            )
-         (values t :penetrating
-                 #+no (if (< (min (abs (- i1-min i2-min)) (abs (- i1-max i2-max))) threshold) :touching :penetrating)))
-        ((<= i2-min i1-min i2-max i1-max) ; case 5
-         (d "~4@TOverlap ~A~%"
-            (abs (- i1-min i2-max)))
-         (values t (if (< (abs (- i1-min i2-max)) threshold) :touching :penetrating)))
-        #+no ((not (or (> (- i2-min i1-max) threshold)
-                  (> (- i1-min i2-max) threshold)))
-         (d "~4@TOverlaps ~A ~A ~A ~A~%"
-            (abs (- i2-min i1-max)) ; case 2
-            (abs (- i1-min i2-min)) ; cases 3 4
-            (abs (- i1-max i2-max)) ; cases 3 4
-            (abs (- i1-min i2-max))) ; case 5
-         t)
-        (t ; no intersection
-         nil)))
+  (let ((threshold (coerce threshold 'double-float)))
+    (cond ((<= (abs (- (min i1-min i2-min) (max i1-max i2-max))) threshold)
+           (values t :identical))
+          ((<= i1-min i2-min i1-max i2-max) ; case 2
+           (d "~4@TOverlap ~A~%"
+              (abs (- i2-min i1-max)))
+           (values t (if (< (abs (- i2-min i1-max)) threshold) :touching :penetrating)))
+          ((<= i1-min i2-min i2-max i1-max) ; case 3
+           (d "~4@TI₂ ⊂ I₁ (case 3) Overlaps ~A ~A~%"
+              (abs (- i1-min i2-min))   ; cases 3 4
+              (abs (- i1-max i2-max))   ; cases 3 4
+              )
+           (values t :penetrating
+                   #+no (if (< (min (abs (- i1-min i2-min)) (abs (- i1-max i2-max))) threshold)
+                            :touching
+                            :penetrating)))
+          ((<= i2-min i1-min i1-max i2-max) ; case 4
+           (d "~4@TI₁ ⊂ I₂ (case 4) Overlaps ~A ~A~%"
+              (abs (- i1-min i2-min))   ; cases 3 4
+              (abs (- i1-max i2-max))   ; cases 3 4
+              )
+           (values t :penetrating
+                   #+no (if (< (min (abs (- i1-min i2-min)) (abs (- i1-max i2-max))) threshold) :touching :penetrating)))
+          ((<= i2-min i1-min i2-max i1-max) ; case 5
+           (d "~4@TOverlap ~A~%"
+              (abs (- i1-min i2-max)))
+           (values t (if (< (abs (- i1-min i2-max)) threshold) :touching :penetrating)))
+          #+no ((not (or (> (- i2-min i1-max) threshold)
+                         (> (- i1-min i2-max) threshold)))
+                (d "~4@TOverlaps ~A ~A ~A ~A~%"
+                   (abs (- i2-min i1-max))  ; case 2
+                   (abs (- i1-min i2-min))  ; cases 3 4
+                   (abs (- i1-max i2-max))  ; cases 3 4
+                   (abs (- i1-min i2-max))) ; case 5
+                t)
+          (t                            ; no intersection
+           nil))))
 
-(defun triangles-intersect-old-p (u1 u2 u3 v1 v2 v3 &key (bias .0001))
-  (flet ((separating-axis-p (axis bias &optional note)
-           (let* ((du1    (+ (v. axis u1) bias))
-                  (du2    (+ (v. axis u2) bias))
-                  (du3    (+ (v. axis u3) bias))
-                  (dv1    (v. axis v1))
-                  (dv2    (v. axis v2))
-                  (dv3    (v. axis v3))
-                  (iu-min (min du1 du2 du3)) ; interval u min
-                  (iu-max (max du1 du2 du3)) ; interval u max
-                  (iv-min (min dv1 dv2 dv3)) ; interval v min
-                  (iv-max (max dv1 dv2 dv3)))
-             (d "Axis~@[ ~A~] ~A~&~
-                 Bias ~A~&~
-                 ~2@T=> {~5,2F ~5,2F ~5,2F} {~5,2F ~5,2F ~5,2F}~&~
-                 ~2@T=> [~5,2F, ~5,2F] [~5,2F, ~5,2F]~%"
-                note axis bias
-                du1 du2 du3 dv1 dv2 dv3
-                iu-min iu-max iv-min iv-max)
-             (let ((result (intervals-intersect-p iu-min iu-max iv-min iv-max)))
-               (format *trace-output* "~2@T~A~%" (if result "?" "separating"))
-               (not result)))))
-    (let* ((normal-u (vunit (vc (v- u2 u1) (v- u3 u1))))
-           (n12      (vunit (vc normal-u (v- u2 u1)))) ; TODO compute when needed
-           (n23      (vunit (vc normal-u (v- u3 u2))))
-           (n31      (vunit (vc normal-u (v- u1 u3)))))
-
-      (apply #'debug-line** (v/ (v+ u1 u2 u3) 3) (v* normal-u .1)
-             (when (or (separating-axis-p normal-u      bias)
-                       (separating-axis-p (v- normal-u) (- bias)))
-               (list :diffuse-factor #(1 0 0))))
-      (apply #'debug-line** (v/ (v+ u1 u2) 2)    (v* n12 .05)
-             (when (separating-axis-p n12 0)
-               (list :diffuse-factor #(1 0 0))))
-      (apply #'debug-line** (v/ (v+ u2 u3) 2)    (v* n23 .05)
-             (when (separating-axis-p n23 0)
-               (list :diffuse-factor #(1 0 0))))
-      (apply #'debug-line** (v/ (v+ u3 u1) 2)    (v* n31 .05)
-             (when (separating-axis-p n31 0)
-               (list :diffuse-factor #(1 0 0))))
-
-      (and (not (separating-axis-p normal-u      bias     "normal"))
-           (not (separating-axis-p (v- normal-u) (- bias) "-normal"))
-           (not (separating-axis-p n12           0))
-           (not (separating-axis-p n23           0))
-           (not (separating-axis-p n31           0))))))
-
-(defun triangles-intersect-p (u1 u2 u3 v1 v2 v3 &key (bias .0001) (threshold 1d-6))
+(defun triangles-intersect-p (u1 u2 u3 v1 v2 v3 &key (threshold 1d-6))
+  (declare (type dvec3 u1 u2 u3 v1 v2 v3))
   (d "U~2@T~A~%~2@T~A~%~2@T~A~%V~2@T~A~%~2@T~A~%~2@T~A~%" u1 u2 u3 v1 v2 v3)
-  (flet ((separating-axis-p (axis bias &optional note)
-           (let* ((du1    (+ (v. axis u1) bias))
-                  (du2    (+ (v. axis u2) bias))
-                  (du3    (+ (v. axis u3) bias))
+  (flet ((separating-axis-p (axis &optional note)
+           (declare (type dvec3 axis))
+           (let* ((du1    (v. axis u1))
+                  (du2    (v. axis u2))
+                  (du3    (v. axis u3))
                   (dv1    (v. axis v1))
                   (dv2    (v. axis v2))
                   (dv3    (v. axis v3))
@@ -415,9 +371,7 @@
         (*mesh-number* 1)
         (*annotations* '())
         (*annotation-number* 0)
-        (*debug-output* t)
-
-        (bias .125))
+        (*debug-output* t))
     (multiple-value-bind (vertices-u faces-u) (gen-triangle)
       (multiple-value-bind (vertices-v faces-v) (gen-triangle)
         (multiple-value-bind (vertices-w faces-w) (gen-triangle)
@@ -436,36 +390,31 @@
                                                              (aref vertices-u 2)
                                                              (aref vertices-v 0)
                                                              (aref vertices-v 1)
-                                                             (aref vertices-v 2)
-                                                             :bias bias))
+                                                             (aref vertices-v 2)))
                       (intersect-uw-p (triangles-intersect-p (aref vertices-u 0)
                                                              (aref vertices-u 1)
                                                              (aref vertices-u 2)
                                                              (aref vertices-w 0)
                                                              (aref vertices-w 1)
-                                                             (aref vertices-w 2)
-                                                             :bias bias))
+                                                             (aref vertices-w 2)))
                       (intersect-ux-p (triangles-intersect-p (aref vertices-u 0)
                                                              (aref vertices-u 1)
                                                              (aref vertices-u 2)
                                                              (aref vertices-x 0)
                                                              (aref vertices-x 1)
-                                                             (aref vertices-x 2)
-                                                             :bias bias))
+                                                             (aref vertices-x 2)))
                       (intersect-uy-p (triangles-intersect-p (aref vertices-u 0)
                                                              (aref vertices-u 1)
                                                              (aref vertices-u 2)
                                                              (aref vertices-y 0)
                                                              (aref vertices-y 1)
-                                                             (aref vertices-y 2)
-                                                             :bias bias))
+                                                             (aref vertices-y 2)))
                       (intersect-uz-p (triangles-intersect-p (aref vertices-u 0)
                                                              (aref vertices-u 1)
                                                              (aref vertices-u 2)
                                                              (aref vertices-z 0)
                                                              (aref vertices-z 1)
-                                                             (aref vertices-z 2)
-                                                             :bias bias)))
+                                                             (aref vertices-z 2))))
                   (let* ((object-file #P"/tmp/triangle-intersection.obj")
                          (output-file #P"/tmp/triangle-intersection.png")
                          (objects     (append (list (make-triangle-mesh (flatten-vertices vertices-u) faces-u
@@ -504,9 +453,7 @@
       (*mesh-number* 1)
       (*annotations* '())
       (*annotation-number* 0)
-      (*debug-output* t)
-
-      (bias .125))
+      (*debug-output* t))
   (multiple-value-bind (vertices-u faces-u) (gen-triangle)
     (multiple-value-bind (vertices-v faces-v) (gen-triangle)
       (progn
@@ -519,7 +466,7 @@
                (v1 (aref vertices-v 0))
                (v2 (aref vertices-v 1))
                (v3 (aref vertices-v 2))
-               (intersect-uv-p (triangles-intersect-p u1 u2 u3 v1 v2 v3 :bias bias))
+               (intersect-uv-p (triangles-intersect-p u1 u2 u3 v1 v2 v3))
                (v1-on-u-p (point-on-triangle-p u1 u2 u3 v1))
                (v2-on-u-p (point-on-triangle-p u1 u2 u3 v2))
                (v3-on-u-p (point-on-triangle-p u1 u2 u3 v3)))
