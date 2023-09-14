@@ -10,6 +10,7 @@
   :source-control (:git "https://github.com/shirakumo/convex-covering.git")
   :serial T
   :components ((:file "package")
+               (:file "debug")
                (:file "geometry")
                (:file "merging")
                (:file "decomposition")
@@ -29,11 +30,11 @@
                     (uiop:symbol-call "ORG.SHIRAKUMO.FRAF.CONVEX-COVERING.TEST"
                                       '#:decompose-test-files)))
 
-(defsystem "convex-covering/debug"
+(defsystem "convex-covering/visualization"
   :depends-on ("alexandria"
                "cl-dot"
                "inferior-shell"
 
                "convex-covering"
                "convex-covering/test")
-  :components ((:file "debug")))
+  :components ((:file "visualization")))

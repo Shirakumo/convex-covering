@@ -99,7 +99,7 @@
                (d "~4@T=> ~A~@[ | ~A~]~%" (if intersectp "not separating" "separating") class)
                (values (not intersectp) class)))))
     (d "--------------------~%")
-    (multiple-value-bind (result constellation-class contact-class)
+    (multiple-value-bind (result constellation contact)
         (let ((normal-u (vunit (vc (v- u2 u1) (v- u3 u1)))))
           (d "Normal~%")
           (multiple-value-bind (normal-separating-p normal-class)
@@ -112,7 +112,7 @@
                   ((eq normal-class :identical)
                    (d "Edge normals (coplanar case)~%")
                    (block nil
-                     (let ((contact-class :penetrating))
+                     (let ((contact :penetrating))
                        (flet ((test-axis (e1 e2)
                                 (declare (type dvec3 e1 e2))
                                 (let ((edge-normal (vunit (vc normal-u (v- e2 e1)))))
@@ -121,16 +121,16 @@
                                     (cond (separatingp
                                            (return (values nil :coplanar)))
                                           (t
-                                           (when (and (eq contact-class :penetrating)
+                                           (when (and (eq contact :penetrating)
                                                       (eq class :touching))
-                                             (setf contact-class class))))))))
+                                             (setf contact class))))))))
                          (test-axis u1 u2)
                          (test-axis u2 u3)
                          (test-axis u3 u1)
                          (test-axis v1 v2)
                          (test-axis v2 v3)
                          (test-axis v3 v1)
-                         (values t :coplanar contact-class))))
+                         (values t :coplanar contact))))
 
                    #+old(let ((n12 (vunit (vc normal-u (v- u2 u1))))
                               (n23 (vunit (vc normal-u (v- u3 u2))))
@@ -144,7 +144,7 @@
                                  (values nil :coplanar)))))
                   (t
                    (d "General edge pairs~%")
-                   (let ((contact-class normal-class))
+                   (let ((contact normal-class))
                      (if (flet ((test-axis (u1 u2 v1 v2)
                                   (let ((c (vc (v- u2 u1) (v- v2 v1))))
                                     (unless (< (vsqrlength c) threshold)
@@ -152,9 +152,9 @@
                                         (multiple-value-bind (separatingp class)
                                             (separating-axis-p c* 0)
                                           (when (and (not separatingp)
-                                                     (eq contact-class :penetrating)
+                                                     (eq contact :penetrating)
                                                      (eq class :touching))
-                                            (setf contact-class class))
+                                            (setf contact class))
                                           (when (boundp '*annotation-number*)
                                             (apply #'debug-line** u1 (v* c* .1)
                                                    (when separatingp
@@ -169,16 +169,102 @@
                                                :when (test-axis a1 a2 b1 b2)
                                                :do (return-from outer t)))))
                          nil
-                         (values t nil contact-class)))))))
+                         (values t nil contact)))))))
       (d "=> ~A~:*~:[~; ~A ~A~]~%"
          result
-         (or constellation-class :general)
-         contact-class)
+         (or constellation :general)
+         contact)
       (d "--------------------~%")
-      (values result constellation-class contact-class))))
+      (values result constellation contact))))
 
-(defun line-intersects-triangle-p (u1 u2 u3 l1 l2 &key (eps 1d-6))
-  )
+(defun line-intersects-triangle-p (u1 u2 u3 l1 l2 &key (threshold 1d-6))
+  (declare (type dvec3 u1 u2 u3 l1 l2))
+  (d "U~2@T~A~%~2@T~A~%~2@T~A~%L~2@T~A~%~2@T~A~%" u1 u2 u3 l1 l2)
+  (flet ((separating-axis-p (axis)
+           (declare (type dvec3 axis))
+           (let* ((du1    (v. axis u1))
+                  (du2    (v. axis u2))
+                  (du3    (v. axis u3))
+                  (dl1    (v. axis l1))
+                  (dl2    (v. axis l2))
+                  (iu-min (min du1 du2 du3)) ; interval u min
+                  (iu-max (max du1 du2 du3)) ; interval u max
+                  (iv-min (min dl1 dl2))     ; interval v min
+                  (iv-max (max dl1 dl2)))
+             (d "~2@TAxis~@[ ~A~] ~A~&~
+                 ~4@T=> {~5,2F ~5,2F ~5,2F} {~5,2F ~5,2F}~&~
+                 ~4@T=> [~5,2F, ~5,2F] [~5,2F, ~5,2F]~%"
+                nil axis
+                du1 du2 du3 dl1 dl2
+                iu-min iu-max iv-min iv-max)
+             (multiple-value-bind (intersectp class)
+                 (intervals-intersect-p iu-min iu-max iv-min iv-max
+                                        :threshold threshold)
+               (d "~4@T=> ~A~@[ | ~A~]~%" (if intersectp "not separating" "separating") class)
+               (values (not intersectp) class)))))
+    (d "--------------------~%")
+    (multiple-value-bind (result constellation contact)
+        (let ((normal-u (vunit (vc (v- u2 u1) (v- u3 u1)))))
+          (d "Normal~%")
+          (multiple-value-bind (normal-separating-p normal-class)
+              (separating-axis-p normal-u)
+            (d "~2@T=> ~:[not separating~;separating~]~@[ | ~A~]~%"
+               normal-separating-p normal-class)
+            (cond (normal-separating-p
+                   (d "normal separating~%")
+                   nil)
+                  ((eq normal-class :identical)
+                   (d "Edge normals (coplanar case)~%")
+                   (block nil
+                     (let ((contact :penetrating))
+                       (flet ((test-axis (e1 e2)
+                                (declare (type dvec3 e1 e2))
+                                (let ((edge-normal (vunit (vc normal-u (v- e2 e1)))))
+                                  (multiple-value-bind (separatingp class)
+                                      (separating-axis-p edge-normal)
+                                    (cond (separatingp
+                                           (return (values nil :coplanar)))
+                                          (t
+                                           (when (and (eq contact :penetrating)
+                                                      (eq class :touching))
+                                             (setf contact class))))))))
+                         (test-axis u1 u2)
+                         (test-axis u2 u3)
+                         (test-axis u3 u1)
+                         (test-axis l1 l2)
+                         (values t :coplanar contact)))))
+                  (t
+                   (d "General edge pairs~%")
+                   (let ((contact normal-class))
+                     (if (flet ((test-axis (u1 u2 v1 v2)
+                                  (let ((c (vc (v- u2 u1) (v- v2 v1))))
+                                    (unless (< (vsqrlength c) threshold)
+                                      (let ((c* (vunit c)))
+                                        (multiple-value-bind (separatingp class)
+                                            (separating-axis-p c*)
+                                          (when (and (not separatingp)
+                                                     (eq contact :penetrating)
+                                                     (eq class :touching))
+                                            (setf contact class))
+                                          (when (boundp '*annotation-number*)
+                                            (apply #'debug-line** u1 (v* c* .1)
+                                                   (when separatingp
+                                                     (list :diffuse-factor #(1 0 0)))))
+                                          separatingp))))))
+                           (prog1
+                               (loop :named outer
+                                     :for (a1 a2) :on (list u1 u2 u3 u1)
+                                     :while a2
+                                     :do (when (test-axis a1 a2 l1 l2)
+                                           (return-from outer t)))))
+                         nil
+                         (values t nil contact)))))))
+      (d "=> ~A~:*~:[~; ~A ~A~]~%"
+         result
+         (or constellation :general)
+         contact)
+      (d "--------------------~%")
+      (values result constellation contact))))
 
 (defun point-on-triangle-p (u1 u2 u3 v &key (threshold .00001))
   (flet ((separating-axis-p (axis bias &optional note)
@@ -212,6 +298,12 @@
         (d "--------------------~%")))))
 
 ;;; Test
+
+(defun gen-vertex (&key (gen-coord  (lambda ()
+                                      (- (random 1.0d0) 0.5d0))))
+  (flet ((coord ()
+           (funcall gen-coord)))
+    (dvec (coord) (coord) (coord))))
 
 (defun gen-triangle (&key (gen-coord  (lambda ()
                                         (- (random 1.0d0) 0.5d0)))
@@ -449,53 +541,122 @@
                     (org.shirakumo.fraf.wavefront:serialize objects object-file :if-exists :supersede)
                     (render-wavefront object-file output-file :camera-position (dvec 2 2 2))))))))))))
 
-(let ((*material-number* 1)
-      (*mesh-number* 1)
-      (*annotations* '())
-      (*annotation-number* 0)
-      (*debug-output* t))
-  (multiple-value-bind (vertices-u faces-u) (gen-triangle)
-    (multiple-value-bind (vertices-v faces-v) (gen-triangle)
-      (progn
-        (setf (aref vertices-v 0) (aref vertices-u 0)
+(defun test-3 ()
+  (let ((*material-number* 1)
+        (*mesh-number* 1)
+        (*annotations* '())
+        (*annotation-number* 0)
+        (*debug-output* t))
+    (multiple-value-bind (vertices-u faces-u) (gen-triangle)
+      (multiple-value-bind (vertices-v faces-v) (gen-triangle)
+        (progn
+          (setf (aref vertices-v 0) (aref vertices-u 0)
                                         ; (aref vertices-v 1) (aref vertices-u 1)
-              )
-        (let* ((u1 (aref vertices-u 0))
-               (u2 (aref vertices-u 1))
-               (u3 (aref vertices-u 2))
-               (v1 (aref vertices-v 0))
-               (v2 (aref vertices-v 1))
-               (v3 (aref vertices-v 2))
-               (intersect-uv-p (triangles-intersect-p u1 u2 u3 v1 v2 v3))
-               (v1-on-u-p (point-on-triangle-p u1 u2 u3 v1))
-               (v2-on-u-p (point-on-triangle-p u1 u2 u3 v2))
-               (v3-on-u-p (point-on-triangle-p u1 u2 u3 v3)))
-          (let* ((object-file #P"/tmp/triangle-intersection.obj")
-                 (output-file #P"/tmp/triangle-intersection.png")
+                )
+          (let* ((u1 (aref vertices-u 0))
+                 (u2 (aref vertices-u 1))
+                 (u3 (aref vertices-u 2))
+                 (v1 (aref vertices-v 0))
+                 (v2 (aref vertices-v 1))
+                 (v3 (aref vertices-v 2))
+                 (intersect-uv-p (triangles-intersect-p u1 u2 u3 v1 v2 v3))
+                 (v1-on-u-p (point-on-triangle-p u1 u2 u3 v1))
+                 (v2-on-u-p (point-on-triangle-p u1 u2 u3 v2))
+                 (v3-on-u-p (point-on-triangle-p u1 u2 u3 v3)))
+            (let* ((object-file #P"/tmp/triangle-intersection.obj")
+                   (output-file #P"/tmp/triangle-intersection.png")
+                   (objects     (append (list (make-triangle-mesh (flatten-vertices vertices-u) faces-u
+                                                                  :diffuse-factor #(.7 .5 .5))
+                                              #+no (make-triangle-mesh (flatten-vertices (offset-vertices-along-normal vertices-u bias)) faces-u
+                                                                       :diffuse-factor #(.7 1 1)
+                                                                       :alpha .5)
+                                              #+no (make-triangle-mesh (flatten-vertices (offset-vertices-along-normal vertices-u (- bias))) faces-u
+                                                                       :diffuse-factor #(1 1 .7)
+                                                                       :alpha .5)
+                                              (make-triangle-mesh (flatten-vertices vertices-v) faces-v
+                                                                  :diffuse-factor (if intersect-uv-p
+                                                                                      #(0 1 0)
+                                                                                      #(.6 .7 .6)))
+                                              (debug-cube v1 "v1" (make-material (if v1-on-u-p
+                                                                                     #(1 0 0)
+                                                                                     #(.6 .6 .6)))
+                                                          :offset .03)
+                                              (debug-cube v2 "v2" (make-material (if v2-on-u-p
+                                                                                     #(1 0 0)
+                                                                                     #(.6 .6 .6)))
+                                                          :offset .03)
+                                              (debug-cube v3 "v3" (make-material (if v3-on-u-p
+                                                                                     #(1 0 0)
+                                                                                     #(.6 .6 .6)))
+                                                          :offset .03))
+                                        *annotations*)))
+              (org.shirakumo.fraf.wavefront:serialize objects object-file :if-exists :supersede)
+              (render-wavefront object-file output-file :camera-position (dvec 2 2 2)))))))))
+
+
+(defun test-4 ()
+  (let ((*material-number* 1)
+        (*mesh-number* 1)
+        (*annotations* '())
+        (*annotation-number* 0)
+        (*debug-output* t))
+    (multiple-value-bind (vertices-u faces-u) (gen-triangle)
+      (let (line-1 line-2 line-3)
+        (let ((c (v/ (reduce #'v+ vertices-u) 3)))
+          (setf line-1 (cons (v+ c (v* (v- (aref vertices-u 0) c) (+ .7 (random .6))))
+                             (v+ c (v* (v- (aref vertices-u 1) c) (+ .7 (random .6)))))))
+        (let ((d (v- (aref vertices-u 1) (aref vertices-u 0))))
+          (setf line-2 (cons (v+ (aref vertices-u 0) (v* d 2))
+                             (v+ (aref vertices-u 1) (v* d 2)))))
+        #+todo (setf (aref vertices-x 0) (aref vertices-u 0)
+                     (aref vertices-x 1) (aref vertices-u 1))
+        (setf line-3 (cons (gen-vertex) (gen-vertex)))
+        (let ((intersect-1-p (line-intersects-triangle-p (aref vertices-u 0)
+                                                         (aref vertices-u 1)
+                                                         (aref vertices-u 2)
+                                                         (car line-1) (cdr line-1)))
+              (intersect-2-p (line-intersects-triangle-p (aref vertices-u 0)
+                                                         (aref vertices-u 1)
+                                                         (aref vertices-u 2)
+                                                         (car line-2) (cdr line-2)))
+              (intersect-3-p (line-intersects-triangle-p (aref vertices-u 0)
+                                                         (aref vertices-u 1)
+                                                         (aref vertices-u 2)
+                                                         (car line-3) (cdr line-3)))
+              #+no (intersect-ux-p (triangles-intersect-p (aref vertices-u 0)
+                                                          (aref vertices-u 1)
+                                                          (aref vertices-u 2)
+                                                          (aref vertices-x 0)
+                                                          (aref vertices-x 1)
+                                                          (aref vertices-x 2)))
+              #+no (intersect-uy-p (triangles-intersect-p (aref vertices-u 0)
+                                                          (aref vertices-u 1)
+                                                          (aref vertices-u 2)
+                                                          (aref vertices-y 0)
+                                                          (aref vertices-y 1)
+                                                          (aref vertices-y 2)))
+              #+no (intersect-uz-p (triangles-intersect-p (aref vertices-u 0)
+                                                          (aref vertices-u 1)
+                                                          (aref vertices-u 2)
+                                                          (aref vertices-z 0)
+                                                          (aref vertices-z 1)
+                                                          (aref vertices-z 2))))
+          (let* ((object-file #P"/tmp/line-triangle-intersection.obj")
+                 (output-file #P"/tmp/line-triangle-intersection.png")
                  (objects     (append (list (make-triangle-mesh (flatten-vertices vertices-u) faces-u
                                                                 :diffuse-factor #(.7 .5 .5))
-                                            #+no (make-triangle-mesh (flatten-vertices (offset-vertices-along-normal vertices-u bias)) faces-u
-                                                                     :diffuse-factor #(.7 1 1)
-                                                                     :alpha .5)
-                                            #+no (make-triangle-mesh (flatten-vertices (offset-vertices-along-normal vertices-u (- bias))) faces-u
-                                                                     :diffuse-factor #(1 1 .7)
-                                                                     :alpha .5)
-                                            (make-triangle-mesh (flatten-vertices vertices-v) faces-v
-                                                                :diffuse-factor (if intersect-uv-p
-                                                                                    #(0 1 0)
-                                                                                    #(.6 .7 .6)))
-                                            (debug-cube v1 "v1" (make-material (if v1-on-u-p
-                                                                                   #(1 0 0)
-                                                                                   #(.6 .6 .6)))
-                                                        :offset .03)
-                                            (debug-cube v2 "v2" (make-material (if v2-on-u-p
-                                                                                   #(1 0 0)
-                                                                                   #(.6 .6 .6)))
-                                                        :offset .03)
-                                            (debug-cube v3 "v3" (make-material (if v3-on-u-p
-                                                                                   #(1 0 0)
-                                                                                   #(.6 .6 .6)))
-                                                        :offset .03))
+                                            (new-debug-line* (car line-1) (cdr line-1) "line-1"
+                                                             (make-material (if intersect-1-p
+                                                                                #(0 1 0)
+                                                                                #(.6 .7 .6))))
+                                            (new-debug-line* (car line-2) (cdr line-2) "line-2"
+                                                             (make-material (if intersect-2-p
+                                                                                #(1 0 0)
+                                                                                #(.7 .6 .6))))
+                                            (new-debug-line* (car line-3) (cdr line-3) "line-3"
+                                                             (make-material (if intersect-3-p
+                                                                                #(0 0 1)
+                                                                                #(.6 .6 .7)))))
                                       *annotations*)))
             (org.shirakumo.fraf.wavefront:serialize objects object-file :if-exists :supersede)
             (render-wavefront object-file output-file :camera-position (dvec 2 2 2))))))))

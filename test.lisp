@@ -5,6 +5,8 @@
    (#:m #:org.shirakumo.fraf.math)
    (#:convex-covering #:org.shirakumo.fraf.convex-covering)
    (#:wavefront #:org.shirakumo.fraf.wavefront))
+  (:shadow
+   #:test)
   (:export
    #:decompose-file
    #:decompose-test-files))
