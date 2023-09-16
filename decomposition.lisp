@@ -34,14 +34,15 @@
             (:constructor %make-face-info (index center size/2)))
   (index  (error "required") :type manifolds:u32)
   (center (error "required") :type vec3)
-  (size/2 (error "required") :type vec3))
+  (size/2 (error "required") :type vec3)) ; TODO cache normal here
 
 (defun make-face-info (face-index v1 v2 v3)
   (declare (type dvec3 v1 v2 v3))
   (let* ((min    (vmin v1 v2 v3))
          (max    (vmax v1 v2 v3))
-         (center (v/ (v+ min max) 2))
-         (size/2 (v- center min)))
+         (size/2 (v/ (v- max min) 2))
+         (center (v+ min size/2)))
+    ;; TODO avoid conversion
     (%make-face-info face-index
                      (vec (vx center) (vy center) (vz center))
                      (vec (vx size/2) (vy size/2) (vz size/2)))))
@@ -53,33 +54,34 @@
   (face-info-size/2 object))
 
 (defun index-faces (vertices faces)
-  (let ((index (org.shirakumo.fraf.trial.space.grid3:make-grid .3 :bsize (vec3 2 2 2))))
+  (let ((index (ecase :kd-tree
+                 (:grid    (org.shirakumo.fraf.trial.space.grid3:make-grid .3 :bsize (vec3 2 2 2)))
+                 (:kd-tree (org.shirakumo.fraf.trial.space.kd-tree:make-kd-tree :dimensions 3)))))
     (loop :for i :below (/ (length faces) 3)
           :for v1 = (manifolds:v vertices (aref faces (+ (* 3 i) 0)))
           :for v2 = (manifolds:v vertices (aref faces (+ (* 3 i) 1)))
           :for v3 = (manifolds:v vertices (aref faces (+ (* 3 i) 2)))
           :for info = (make-face-info i v1 v2 v3)
           :do (space:enter info index))
-    ; (space:reoptimize index)
-    (space:do-overlapping (face-info index (space:region .5 .0 .0 .9 .9 .9))
-      (format *trace-output* "~A~%" face-info))
-    (break "~A" index)
+    ;; (space:reoptimize index)
     index))
 
 ;;; Context
 
 (defstruct (context
             (:constructor make-context (vertices faces
-                                        &aux (vertex-index (index-vertices vertices))
-                                             (face-index   (index-faces vertices faces))))
+                                        &aux (boundary-edges (manifolds::boundary-list faces))
+                                             (vertex-index   (index-vertices vertices))
+                                             (face-index     (index-faces vertices faces))))
             (:copier nil)
             (:predicate nil))
   ;; Mesh
-  (vertices     (error "required"))
-  (faces        (error "required"))
+  (vertices       (error "required") :type (manifolds:vertex-array double-float) :read-only t)
+  (faces          (error "required") :type manifolds:face-array :read-only t)
+  (boundary-edges (error "required") :read-only t) ; TODO types
   ;; Index structures
-  (vertex-index (error "required"))
-  (face-index   (error "required")))
+  (vertex-index   (error "required") :read-only t)
+  (face-index     (error "required") :read-only t))
 
 ;;;
 
@@ -88,9 +90,10 @@
             (:conc-name NIL)
             (:copier NIL)
             (:predicate NIL))
-  (vertices #() :type (manifolds:vertex-array double-float))
-  (faces    #() :type manifolds:face-array)
+  (vertices     #() :type (manifolds:vertex-array double-float)) ; TODO some are read-only
+  (faces        #() :type manifolds:face-array)
   (face-normals '())                    ; TODO facet normals
+  (bounding-box nil :type (or null cons)) ; (location . size/2)
   ;; Maybe essential
   (global-faces #() :type manifolds:face-array)
   ;; Debugging
@@ -116,6 +119,29 @@
     (%make-convex-hull vertices faces (make-array (length global-faces)
                                                   :element-type 'manifolds:u32
                                                   :initial-contents global-faces))))
+
+(defun ensure-bounding-box (hull)
+  (check-type hull convex-hull)
+  (let* ((vertices (vertices hull))
+         (faces (faces hull))
+         (min (dvec (aref vertices 0) (aref vertices 1) (aref vertices 2)))
+         (max min))
+    (manifolds:do-faces (a b c faces)
+      (let ((v1 (manifolds:v vertices a))
+            (v2 (manifolds:v vertices b))
+            (v3 (manifolds:v vertices c)))
+        (setf min (vmin min v1 v2 v3) ; TODO can use destructive destructive (but make max separate, then)
+              max (vmax max v1 v2 v3))))
+    (let* ((size/2   (v/ (v- max min) 2))
+           (location (v+ min size/2)))
+      (cons (vec (vx location) (vy location) (vz location)) ; TODO there has to be a better way to convert
+            (vec (vx size/2)   (vy size/2)   (vz size/2))))))
+
+(defmethod space:location ((object convex-hull))
+  (car (ensure-bounding-box object)))
+
+(defmethod space:bsize ((object convex-hull))
+  (cdr (ensure-bounding-box object)))
 
 (defstruct (patch
             (:constructor %make-patch (faces &optional surface-area hull))
@@ -151,9 +177,9 @@
             :for key = (list x y z)
             :do (unless (gethash key seen) ; in case quickhull does not permit duplicate vertices
                   (setf (gethash key seen) t)
-                  (assert (loop :for k :below (/ (length all-vertices) 3)
-                                :for v = (manifolds:v all-vertices k)
-                                :thereis (v= v (dvec x y z))))
+                  #+assertions (assert (loop :for k :below (/ (length all-vertices) 3)
+                                             :for v = (manifolds:v all-vertices k)
+                                             :thereis (v= v (dvec x y z))))
                   (vector-push-extend x vertices)
                   (vector-push-extend y vertices)
                   (vector-push-extend z vertices))
@@ -327,13 +353,14 @@
         (setf (aref patchlist i) patch)
         (incf i)))
     ;; 2. Find neighbouring patches and create the links
-    (let ((adjacents (manifolds:face-adjacency-list indices)))
-      (dotimes (face (length adjacents))
-        (loop for other in (aref adjacents face)
-              for link = (link-patches context
-                                       (aref patchlist face) (aref patchlist other))
-              when link
-              do (setf (gethash link links) T))))
+    (let ((*debug-visualizations* nil))
+      (let ((adjacents (manifolds:face-adjacency-list indices)))
+        (dotimes (face (length adjacents))
+          (loop for other in (aref adjacents face)
+                for link = (link-patches context
+                                         (aref patchlist face) (aref patchlist other))
+                when link
+                  do (setf (gethash link links) T)))))
     (visualize-step patches 0)
     ;; 3. Greedily merge patches according to merge cost
     (let ((i 1))
