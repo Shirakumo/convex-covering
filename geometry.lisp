@@ -1,20 +1,38 @@
 (in-package #:org.shirakumo.fraf.convex-covering)
 
-;;; Debugging
+;;; Bounding box
 
-(defvar *annotations*)
-(defvar *annotation-number*)
+(declaim (ftype (function (dvec3 dvec3) (values vec3 vec3 &optional nil))
+                center-and-size-from-min-and-max)
+         ;; (inline center-and-size-from-min-and-max)
+         )
+(defun center-and-size-from-min-and-max (min max)
+  (let* ((size/2 (v/ (v- max min) 2))
+         (center (v+ min size/2)))
+    ;; TODO avoid conversion
+    (values (vec (vx center) (vy center) (vz center))
+            (vec (vx size/2) (vy size/2) (vz size/2)))))
 
-(defun debug-line** (from direction &key (sample-count 32)
-                                         (diffuse-factor #(.8 .8 .8)))
-  (loop :with d = (v/ direction (float sample-count 1.0d0))
-        :repeat sample-count
-        :for v = from :then (v+ v d)
-        :do (push (debug-cube v
-                              (format nil "annotation~D" (incf *annotation-number*))
-                              (make-material diffuse-factor)
-                              :offset .001)
-                  *annotations*)))
+(declaim (ftype (function (dvec3 dvec3 dvec3) (values vec3 vec3 &optional nil))
+                triangle-bounding-box)
+         ;; (inline triangle-bounding-box)
+         )
+(defun triangle-bounding-box (v1 v2 v3)
+  (let ((min (vmin v1 v2 v3))
+        (max (vmax v1 v2 v3)))
+    (center-and-size-from-min-and-max min max)))
+
+(declaim (ftype (function (manifolds:vertex-array manifolds:face-array manifolds:u32)
+                          (values vec3 vec3 &optional nil))
+                face-bounding-box)
+         ;; (inline face-bounding-box)
+         )
+(defun face-bounding-box (vertices faces face-index)
+  ;; TODO add manifolds:f
+  (let ((v1 (manifolds:v vertices (aref faces (+ (* 3 face-index) 0))))
+        (v2 (manifolds:v vertices (aref faces (+ (* 3 face-index) 1))))
+        (v3 (manifolds:v vertices (aref faces (+ (* 3 face-index) 2)))))
+    (triangle-bounding-box v1 v2 v3)))
 
 ;;; Helper functions
 
@@ -296,367 +314,3 @@
                (not (separating-axis-p n23 0))
                (not (separating-axis-p n31 0)))
         (d "--------------------~%")))))
-
-;;; Test
-
-(defun gen-vertex (&key (gen-coord  (lambda ()
-                                      (- (random 1.0d0) 0.5d0))))
-  (flet ((coord ()
-           (funcall gen-coord)))
-    (dvec (coord) (coord) (coord))))
-
-(defun gen-triangle (&key (gen-coord  (lambda ()
-                                        (- (random 1.0d0) 0.5d0)))
-                          (gen-vertex (lambda ( ; gen-coord
-                                               )
-                                        (flet ((coord ()
-                                                 (funcall gen-coord)))
-                                          (dvec (coord) (coord) (coord))))))
-  (let ((a (funcall gen-vertex))
-        (b (funcall gen-vertex))
-        (c (funcall gen-vertex)))
-    (values (vector a b c) (vector 0 1 2))))
-
-(defun flatten-vertices (vertices)
-  (let ((result (make-array (* 3 (length vertices))))
-        (i      0))
-    (map nil (lambda (vertex)
-               (setf (aref result (+ i 0)) (vx vertex)
-                     (aref result (+ i 1)) (vy vertex)
-                     (aref result (+ i 2)) (vz vertex))
-               (incf i 3))
-         vertices)
-    result))
-
-(defun offset-vertices (vertices direction))
-
-(defun offset-vertices-along-normal (vertices offset)
-  (let* ((a      (aref vertices 0))
-         (b      (aref vertices 1))
-         (c      (aref vertices 2))
-         (normal (vc (v- b a) (v- c a))))
-    (vector (v+ a (v* normal offset))
-            (v+ b (v* normal offset))
-            (v+ c (v* normal offset)))))
-
-(defvar *material-number*)
-(defun make-material (diffuse-factor &key (name (prog1
-                                                    (format nil "material~D" *material-number*)
-                                                  (incf *material-number*)))
-                                          alpha)
-  (apply #'make-instance 'org.shirakumo.fraf.wavefront:material
-         :name name
-         :diffuse-factor diffuse-factor
-         (when (and alpha (/= alpha 1))
-           (list :transmission-factor (- 1 alpha)))))
-
-(defvar *mesh-number*)
-(defun make-triangle-mesh (vertices faces &key (name (prog1
-                                                         (format nil "mesh~D" *mesh-number*)
-                                                       (incf *mesh-number*)))
-                                               diffuse-factor
-                                               (alpha 1)
-                                               (material (make-material diffuse-factor :alpha alpha)))
-  (make-instance 'org.shirakumo.fraf.wavefront:mesh
-                 :name name
-                 :attributes '(:position)
-                 :vertex-data vertices
-                 :index-data faces
-                 :material material))
-
-;;; Coplanar cases
-(defun test-1 ()
-  (let ((*material-number* 1)
-        (*mesh-number* 1)
-        (*annotations* '())
-        (*annotation-number* 0)
-        (*debug-output* t))
-    (multiple-value-bind (vertices-u faces-u) (gen-triangle)
-      (multiple-value-bind (vertices-v faces-v) (gen-triangle)
-        (multiple-value-bind (vertices-w faces-w) (gen-triangle)
-          (multiple-value-bind (vertices-x faces-x) (gen-triangle)
-            (multiple-value-bind (vertices-y faces-y) (gen-triangle)
-              (progn ; multiple-value-bind (vertices-z faces-z) (gen-triangle)
-                ;; Coplanar intersecting
-                (let ((c (v/ (reduce #'v+ vertices-u) 3)))
-                  (map-into vertices-v (lambda (v) (v+ c (v* (v- v c) (+ .7 (random .6))))) vertices-u))
-                ;; Coplanar non-intersecting
-                (let ((d (v- (aref vertices-u 1) (aref vertices-u 0))))
-                  (map-into vertices-w (lambda (v) (v+ v (v* d 2))) vertices-u))
-                ;; Coplanar one-edge intersection other vertex outside
-                (let ((d (v- (aref vertices-u 2) (aref vertices-u 0))))
-                  (setf (aref vertices-x 0) (aref vertices-u 0)
-                        (aref vertices-x 1) (aref vertices-u 1)
-                        (aref vertices-x 2) (v+ (aref vertices-u 0) (v* d -2))))
-                ;; Coplanar one-edge intersection other vertex inside
-                (let ((c (v/ (v+ (aref vertices-u 0) (aref vertices-u 1) (aref vertices-u 2)) 3)))
-                  (setf (aref vertices-y 0) (aref vertices-u 0)
-                        (aref vertices-y 1) (aref vertices-u 1)
-                        (aref vertices-y 2) c))
-
-                (let ((intersect-uv-p (triangles-intersect-p (aref vertices-u 0)
-                                                             (aref vertices-u 1)
-                                                             (aref vertices-u 2)
-                                                             (aref vertices-v 0)
-                                                             (aref vertices-v 1)
-                                                             (aref vertices-v 2)))
-                      (intersect-uw-p (triangles-intersect-p (aref vertices-u 0)
-                                                             (aref vertices-u 1)
-                                                             (aref vertices-u 2)
-                                                             (aref vertices-w 0)
-                                                             (aref vertices-w 1)
-                                                             (aref vertices-w 2)))
-                      (intersect-ux-p (triangles-intersect-p (aref vertices-u 0)
-                                                             (aref vertices-u 1)
-                                                             (aref vertices-u 2)
-                                                             (aref vertices-x 0)
-                                                             (aref vertices-x 1)
-                                                             (aref vertices-x 2)))
-                      (intersect-uy-p (triangles-intersect-p (aref vertices-u 0)
-                                                             (aref vertices-u 1)
-                                                             (aref vertices-u 2)
-                                                             (aref vertices-y 0)
-                                                             (aref vertices-y 1)
-                                                             (aref vertices-y 2)))
-                      #+no (intersect-uz-p (triangles-intersect-p (aref vertices-u 0)
-                                                                  (aref vertices-u 1)
-                                                                  (aref vertices-u 2)
-                                                                  (aref vertices-z 0)
-                                                                  (aref vertices-z 1)
-                                                                  (aref vertices-z 2))))
-                  (let* ((object-file #P"/tmp/triangle-intersection.obj")
-                         (output-file #P"/tmp/triangle-intersection.png")
-                         (objects     (append (list (make-triangle-mesh (flatten-vertices vertices-u) faces-u
-                                                                        :diffuse-factor #(.7 .5 .5))
-                                                    #+no (make-triangle-mesh (flatten-vertices (offset-vertices-along-normal vertices-u bias)) faces-u
-                                                                             :diffuse-factor #(.7 1 1)
-                                                                             :alpha .5)
-                                                    #+no (make-triangle-mesh (flatten-vertices (offset-vertices-along-normal vertices-u (- bias))) faces-u
-                                                                             :diffuse-factor #(1 1 .7)
-                                                                             :alpha .5)
-                                                    (make-triangle-mesh (flatten-vertices vertices-v) faces-v
-                                                                        :diffuse-factor (if intersect-uv-p
-                                                                                            #(0 1 0)
-                                                                                            #(.6 .7 .6)))
-                                                    #+no (make-triangle-mesh (flatten-vertices vertices-w) faces-w
-                                                                             :diffuse-factor (if intersect-uw-p
-                                                                                                 #(0 0 1)
-                                                                                                 #(.6 .6 .7)))
-                                                    (make-triangle-mesh (flatten-vertices vertices-x) faces-x
-                                                                        :diffuse-factor (if intersect-ux-p
-                                                                                            #(1 0 1)
-                                                                                            #(.7 .6 .7)))
-                                                    (make-triangle-mesh (flatten-vertices vertices-y) faces-y
-                                                                        :diffuse-factor (if intersect-uy-p
-                                                                                            #(0 1 1)
-                                                                                            #(.6 .7 .7)))
-                                                    #+no (make-triangle-mesh (flatten-vertices vertices-z) faces-z
-                                                                             :diffuse-factor (if intersect-uz-p
-                                                                                                 #(1 1 0)
-                                                                                                 #(.7 .7 .6))))
-                                              *annotations*)))
-                    (org.shirakumo.fraf.wavefront:serialize objects object-file :if-exists :supersede)
-                    (render-wavefront object-file output-file :camera-position (dvec 2 2 2))))))))))))
-
-(defun test-2 ()
-  (let ((*material-number* 1)
-        (*mesh-number* 1)
-        (*annotations* '())
-        (*annotation-number* 0)
-        (*debug-output* t))
-    (multiple-value-bind (vertices-u faces-u) (gen-triangle)
-      (multiple-value-bind (vertices-v faces-v) (gen-triangle)
-        (multiple-value-bind (vertices-w faces-w) (gen-triangle)
-          (multiple-value-bind (vertices-x faces-x) (gen-triangle)
-            (multiple-value-bind (vertices-y faces-y) (gen-triangle)
-              (multiple-value-bind (vertices-z faces-z) (gen-triangle)
-                (let ((c (v/ (reduce #'v+ vertices-u) 3)))
-                  (map-into vertices-v (lambda (v) (v+ c (v* (v- v c) (+ .7 (random .6))))) vertices-u))
-                (let ((d (v- (aref vertices-u 1) (aref vertices-u 0))))
-                  (map-into vertices-w (lambda (v) (v+ v (v* d 2))) vertices-u))
-                (setf (aref vertices-x 0) (aref vertices-u 0)
-                      (aref vertices-x 1) (aref vertices-u 1))
-                (setf (aref vertices-y 0) (aref vertices-u 0))
-                (let ((intersect-uv-p (triangles-intersect-p (aref vertices-u 0)
-                                                             (aref vertices-u 1)
-                                                             (aref vertices-u 2)
-                                                             (aref vertices-v 0)
-                                                             (aref vertices-v 1)
-                                                             (aref vertices-v 2)))
-                      (intersect-uw-p (triangles-intersect-p (aref vertices-u 0)
-                                                             (aref vertices-u 1)
-                                                             (aref vertices-u 2)
-                                                             (aref vertices-w 0)
-                                                             (aref vertices-w 1)
-                                                             (aref vertices-w 2)))
-                      (intersect-ux-p (triangles-intersect-p (aref vertices-u 0)
-                                                             (aref vertices-u 1)
-                                                             (aref vertices-u 2)
-                                                             (aref vertices-x 0)
-                                                             (aref vertices-x 1)
-                                                             (aref vertices-x 2)))
-                      (intersect-uy-p (triangles-intersect-p (aref vertices-u 0)
-                                                             (aref vertices-u 1)
-                                                             (aref vertices-u 2)
-                                                             (aref vertices-y 0)
-                                                             (aref vertices-y 1)
-                                                             (aref vertices-y 2)))
-                      (intersect-uz-p (triangles-intersect-p (aref vertices-u 0)
-                                                             (aref vertices-u 1)
-                                                             (aref vertices-u 2)
-                                                             (aref vertices-z 0)
-                                                             (aref vertices-z 1)
-                                                             (aref vertices-z 2))))
-                  (let* ((object-file #P"/tmp/triangle-intersection.obj")
-                         (output-file #P"/tmp/triangle-intersection.png")
-                         (objects     (append (list (make-triangle-mesh (flatten-vertices vertices-u) faces-u
-                                                                        :diffuse-factor #(.7 .5 .5))
-                                                    #+no (make-triangle-mesh (flatten-vertices (offset-vertices-along-normal vertices-u bias)) faces-u
-                                                                             :diffuse-factor #(.7 1 1)
-                                                                             :alpha .5)
-                                                    #+no (make-triangle-mesh (flatten-vertices (offset-vertices-along-normal vertices-u (- bias))) faces-u
-                                                                             :diffuse-factor #(1 1 .7)
-                                                                             :alpha .5)
-                                                    (make-triangle-mesh (flatten-vertices vertices-v) faces-v
-                                                                        :diffuse-factor (if intersect-uv-p
-                                                                                            #(0 1 0)
-                                                                                            #(.6 .7 .6)))
-                                                    (make-triangle-mesh (flatten-vertices vertices-w) faces-w
-                                                                        :diffuse-factor (if intersect-uw-p
-                                                                                            #(0 0 1)
-                                                                                            #(.6 .6 .7)))
-                                                    (make-triangle-mesh (flatten-vertices vertices-x) faces-x
-                                                                        :diffuse-factor (if intersect-ux-p
-                                                                                            #(1 0 1)
-                                                                                            #(.7 .6 .7)))
-                                                    (make-triangle-mesh (flatten-vertices vertices-y) faces-y
-                                                                        :diffuse-factor (if intersect-uy-p
-                                                                                            #(0 1 1)
-                                                                                            #(.6 .7 .7)))
-                                                    (make-triangle-mesh (flatten-vertices vertices-z) faces-z
-                                                                        :diffuse-factor (if intersect-uz-p
-                                                                                            #(1 1 0)
-                                                                                            #(.7 .7 .6))))
-                                              *annotations*)))
-                    (org.shirakumo.fraf.wavefront:serialize objects object-file :if-exists :supersede)
-                    (render-wavefront object-file output-file :camera-position (dvec 2 2 2))))))))))))
-
-(defun test-3 ()
-  (let ((*material-number* 1)
-        (*mesh-number* 1)
-        (*annotations* '())
-        (*annotation-number* 0)
-        (*debug-output* t))
-    (multiple-value-bind (vertices-u faces-u) (gen-triangle)
-      (multiple-value-bind (vertices-v faces-v) (gen-triangle)
-        (progn
-          (setf (aref vertices-v 0) (aref vertices-u 0)
-                                        ; (aref vertices-v 1) (aref vertices-u 1)
-                )
-          (let* ((u1 (aref vertices-u 0))
-                 (u2 (aref vertices-u 1))
-                 (u3 (aref vertices-u 2))
-                 (v1 (aref vertices-v 0))
-                 (v2 (aref vertices-v 1))
-                 (v3 (aref vertices-v 2))
-                 (intersect-uv-p (triangles-intersect-p u1 u2 u3 v1 v2 v3))
-                 (v1-on-u-p (point-on-triangle-p u1 u2 u3 v1))
-                 (v2-on-u-p (point-on-triangle-p u1 u2 u3 v2))
-                 (v3-on-u-p (point-on-triangle-p u1 u2 u3 v3)))
-            (let* ((object-file #P"/tmp/triangle-intersection.obj")
-                   (output-file #P"/tmp/triangle-intersection.png")
-                   (objects     (append (list (make-triangle-mesh (flatten-vertices vertices-u) faces-u
-                                                                  :diffuse-factor #(.7 .5 .5))
-                                              #+no (make-triangle-mesh (flatten-vertices (offset-vertices-along-normal vertices-u bias)) faces-u
-                                                                       :diffuse-factor #(.7 1 1)
-                                                                       :alpha .5)
-                                              #+no (make-triangle-mesh (flatten-vertices (offset-vertices-along-normal vertices-u (- bias))) faces-u
-                                                                       :diffuse-factor #(1 1 .7)
-                                                                       :alpha .5)
-                                              (make-triangle-mesh (flatten-vertices vertices-v) faces-v
-                                                                  :diffuse-factor (if intersect-uv-p
-                                                                                      #(0 1 0)
-                                                                                      #(.6 .7 .6)))
-                                              (debug-cube v1 "v1" (make-material (if v1-on-u-p
-                                                                                     #(1 0 0)
-                                                                                     #(.6 .6 .6)))
-                                                          :offset .03)
-                                              (debug-cube v2 "v2" (make-material (if v2-on-u-p
-                                                                                     #(1 0 0)
-                                                                                     #(.6 .6 .6)))
-                                                          :offset .03)
-                                              (debug-cube v3 "v3" (make-material (if v3-on-u-p
-                                                                                     #(1 0 0)
-                                                                                     #(.6 .6 .6)))
-                                                          :offset .03))
-                                        *annotations*)))
-              (org.shirakumo.fraf.wavefront:serialize objects object-file :if-exists :supersede)
-              (render-wavefront object-file output-file :camera-position (dvec 2 2 2)))))))))
-
-
-(defun test-4 ()
-  (let ((*material-number* 1)
-        (*mesh-number* 1)
-        (*annotations* '())
-        (*annotation-number* 0)
-        (*debug-output* t))
-    (multiple-value-bind (vertices-u faces-u) (gen-triangle)
-      (let (line-1 line-2 line-3)
-        (let ((c (v/ (reduce #'v+ vertices-u) 3)))
-          (setf line-1 (cons (v+ c (v* (v- (aref vertices-u 0) c) (+ .7 (random .6))))
-                             (v+ c (v* (v- (aref vertices-u 1) c) (+ .7 (random .6)))))))
-        (let ((d (v- (aref vertices-u 1) (aref vertices-u 0))))
-          (setf line-2 (cons (v+ (aref vertices-u 0) (v* d 2))
-                             (v+ (aref vertices-u 1) (v* d 2)))))
-        #+todo (setf (aref vertices-x 0) (aref vertices-u 0)
-                     (aref vertices-x 1) (aref vertices-u 1))
-        (setf line-3 (cons (gen-vertex) (gen-vertex)))
-        (let ((intersect-1-p (line-intersects-triangle-p (aref vertices-u 0)
-                                                         (aref vertices-u 1)
-                                                         (aref vertices-u 2)
-                                                         (car line-1) (cdr line-1)))
-              (intersect-2-p (line-intersects-triangle-p (aref vertices-u 0)
-                                                         (aref vertices-u 1)
-                                                         (aref vertices-u 2)
-                                                         (car line-2) (cdr line-2)))
-              (intersect-3-p (line-intersects-triangle-p (aref vertices-u 0)
-                                                         (aref vertices-u 1)
-                                                         (aref vertices-u 2)
-                                                         (car line-3) (cdr line-3)))
-              #+no (intersect-ux-p (triangles-intersect-p (aref vertices-u 0)
-                                                          (aref vertices-u 1)
-                                                          (aref vertices-u 2)
-                                                          (aref vertices-x 0)
-                                                          (aref vertices-x 1)
-                                                          (aref vertices-x 2)))
-              #+no (intersect-uy-p (triangles-intersect-p (aref vertices-u 0)
-                                                          (aref vertices-u 1)
-                                                          (aref vertices-u 2)
-                                                          (aref vertices-y 0)
-                                                          (aref vertices-y 1)
-                                                          (aref vertices-y 2)))
-              #+no (intersect-uz-p (triangles-intersect-p (aref vertices-u 0)
-                                                          (aref vertices-u 1)
-                                                          (aref vertices-u 2)
-                                                          (aref vertices-z 0)
-                                                          (aref vertices-z 1)
-                                                          (aref vertices-z 2))))
-          (let* ((object-file #P"/tmp/line-triangle-intersection.obj")
-                 (output-file #P"/tmp/line-triangle-intersection.png")
-                 (objects     (append (list (make-triangle-mesh (flatten-vertices vertices-u) faces-u
-                                                                :diffuse-factor #(.7 .5 .5))
-                                            (new-debug-line* (car line-1) (cdr line-1) "line-1"
-                                                             (make-material (if intersect-1-p
-                                                                                #(0 1 0)
-                                                                                #(.6 .7 .6))))
-                                            (new-debug-line* (car line-2) (cdr line-2) "line-2"
-                                                             (make-material (if intersect-2-p
-                                                                                #(1 0 0)
-                                                                                #(.7 .6 .6))))
-                                            (new-debug-line* (car line-3) (cdr line-3) "line-3"
-                                                             (make-material (if intersect-3-p
-                                                                                #(0 0 1)
-                                                                                #(.6 .6 .7)))))
-                                      *annotations*)))
-            (org.shirakumo.fraf.wavefront:serialize objects object-file :if-exists :supersede)
-            (render-wavefront object-file output-file :camera-position (dvec 2 2 2))))))))

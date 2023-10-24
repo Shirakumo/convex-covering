@@ -10,8 +10,12 @@
   :source-control (:git "https://github.com/shirakumo/convex-covering.git")
   :serial T
   :components ((:file "package")
+
                (:file "debug")
+               (:file "geometry-debug")
+
                (:file "geometry")
+               (:file "context")
                (:file "merging")
                (:file "decomposition")
                (:file "documentation"))

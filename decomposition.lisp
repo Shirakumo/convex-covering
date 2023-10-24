@@ -5,84 +5,6 @@
 
 (in-package #:org.shirakumo.fraf.convex-covering)
 
-;;; Vertex index
-;;;
-;;; Lookup index in global vertex array given the vertex coordinates.
-
-(defun make-vertex-index ()
-  (make-hash-table :test #'equalp))
-
-(defun vertex-position (vertex index)
-  (check-type vertex dvec3)
-  (the (or null manifolds:u32) (gethash vertex index)))
-
-(defun (setf vertex-position) (new-value vertex index)
-  (check-type vertex dvec3)
-  (setf (gethash vertex index) new-value))
-
-(defun index-vertices (vertices)
-  (check-type vertices manifolds:vertex-array)
-  (loop :with index = (make-vertex-index)
-        :for i :below (/ (length vertices) 3)
-        :for vertex = (manifolds:v vertices i)
-        :do (setf (vertex-position vertex index) i)
-        :finally (return index)))
-
-;;; Face index
-
-(defstruct (face-info
-            (:constructor %make-face-info (index center size/2)))
-  (index  (error "required") :type manifolds:u32)
-  (center (error "required") :type vec3)
-  (size/2 (error "required") :type vec3)) ; TODO cache normal here
-
-(defun make-face-info (face-index v1 v2 v3)
-  (declare (type dvec3 v1 v2 v3))
-  (let* ((min    (vmin v1 v2 v3))
-         (max    (vmax v1 v2 v3))
-         (size/2 (v/ (v- max min) 2))
-         (center (v+ min size/2)))
-    ;; TODO avoid conversion
-    (%make-face-info face-index
-                     (vec (vx center) (vy center) (vz center))
-                     (vec (vx size/2) (vy size/2) (vz size/2)))))
-
-(defmethod space:location ((object face-info))
-  (face-info-center object))
-
-(defmethod space:bsize ((object face-info))
-  (face-info-size/2 object))
-
-(defun index-faces (vertices faces)
-  (let ((index (ecase :kd-tree
-                 (:grid    (org.shirakumo.fraf.trial.space.grid3:make-grid .3 :bsize (vec3 2 2 2)))
-                 (:kd-tree (org.shirakumo.fraf.trial.space.kd-tree:make-kd-tree :dimensions 3)))))
-    (loop :for i :below (/ (length faces) 3)
-          :for v1 = (manifolds:v vertices (aref faces (+ (* 3 i) 0)))
-          :for v2 = (manifolds:v vertices (aref faces (+ (* 3 i) 1)))
-          :for v3 = (manifolds:v vertices (aref faces (+ (* 3 i) 2)))
-          :for info = (make-face-info i v1 v2 v3)
-          :do (space:enter info index))
-    ;; (space:reoptimize index)
-    index))
-
-;;; Context
-
-(defstruct (context
-            (:constructor make-context (vertices faces
-                                        &aux (boundary-edges (manifolds::boundary-list faces))
-                                             (vertex-index   (index-vertices vertices))
-                                             (face-index     (index-faces vertices faces))))
-            (:copier nil)
-            (:predicate nil))
-  ;; Mesh
-  (vertices       (error "required") :type (manifolds:vertex-array double-float) :read-only t)
-  (faces          (error "required") :type manifolds:face-array :read-only t)
-  (boundary-edges (error "required") :read-only t) ; TODO types
-  ;; Index structures
-  (vertex-index   (error "required") :read-only t)
-  (face-index     (error "required") :read-only t))
-
 ;;;
 
 (defstruct (convex-hull
@@ -93,7 +15,7 @@
   (vertices     #() :type (manifolds:vertex-array double-float)) ; TODO some are read-only
   (faces        #() :type manifolds:face-array)
   (face-normals '())                    ; TODO facet normals
-  (bounding-box nil :type (or null cons)) ; (location . size/2)
+  (bounding-box nil :type (or null cons)) ; (location . size/2) ; TODO maybe store 3d-space:region directly
   ;; Maybe essential
   (global-faces #() :type manifolds:face-array)
   ;; Debugging
@@ -120,28 +42,53 @@
                                                   :element-type 'manifolds:u32
                                                   :initial-contents global-faces))))
 
-(defun ensure-bounding-box (hull)
+(defun compute-facet-normals (hull) ; TODO these are just face normals for now
+  (loop :with hull-vertices = (vertices hull)
+        :with hull-faces = (faces hull)
+        :for face-index :below (/ (length hull-faces) 3)
+        ; :for face-vertex-index = (aref hull-faces (* 3 face-index))
+        ; :for face-vertex = (manifolds:v hull-vertices face-vertex-index)
+        :for face-normal = (vunit (manifolds:face-normal hull-vertices hull-faces face-index))
+        :for face-centroid = (manifolds:centroid hull-vertices (subseq hull-faces (* 3 face-index) (+ (* 3 face-index) 3)))
+                                        ; :when *debug-visualizations*
+                                        ; :do (push (cons face-centroid :facet-centroid) (problem hull))
+                                        ;   (debug-line face-centroid (v* face-normal .3) :facet-normal hull)
+        :collect (cons face-centroid face-normal)))
+
+(defun ensure-facet-normals (hull)
+  (or (face-normals hull)
+      (setf (face-normals hull) (compute-facet-normals hull))))
+
+(defun compute-bounding-box (hull)
   (check-type hull convex-hull)
   (let* ((vertices (vertices hull))
          (faces (faces hull))
          (min (dvec (aref vertices 0) (aref vertices 1) (aref vertices 2)))
          (max min))
+    (declare (type dvec3 min max))
     (manifolds:do-faces (a b c faces)
       (let ((v1 (manifolds:v vertices a))
             (v2 (manifolds:v vertices b))
             (v3 (manifolds:v vertices c)))
         (setf min (vmin min v1 v2 v3) ; TODO can use destructive destructive (but make max separate, then)
               max (vmax max v1 v2 v3))))
-    (let* ((size/2   (v/ (v- max min) 2))
-           (location (v+ min size/2)))
-      (cons (vec (vx location) (vy location) (vz location)) ; TODO there has to be a better way to convert
-            (vec (vx size/2)   (vy size/2)   (vz size/2))))))
+    (center-and-size-from-min-and-max min max)))
+
+(declaim (inline ensure-bounding-box))
+(defun ensure-bounding-box (hull)
+  (or (bounding-box hull)
+      (setf (bounding-box hull)
+            (multiple-value-call #'cons (compute-bounding-box hull)))))
 
 (defmethod space:location ((object convex-hull))
   (car (ensure-bounding-box object)))
 
 (defmethod space:bsize ((object convex-hull))
   (cdr (ensure-bounding-box object)))
+
+(defun facet-bounding-box (hull facet-index)
+  (check-type hull convex-hull)
+  (face-bounding-box (vertices hull) (faces hull) facet-index))
 
 (defstruct (patch
             (:constructor %make-patch (faces &optional surface-area hull))
@@ -164,26 +111,28 @@
          (vertices ; (make-array (* 3 vertex-count) :element-type 'double-float)
            (make-array 3 :element-type 'double-float :adjustable t :fill-pointer 0))
          (global-faces
-           (make-array 3 :element-type '(unsigned-byte 32) :adjustable t :fill-pointer 0)))
-    (let ((seen (make-hash-table :test #'equal)))
-      (loop :for i :below vertex-count
-            :for j = (aref faces i)
-            :for a = (+ (* 3 j) 0) ; global vertex indices
-            :for b = (+ (* 3 j) 1)
-            :for c = (+ (* 3 j) 2)
-            :for x = (aref all-vertices a) ; TODO can we use manifold:v?
-            :for y = (aref all-vertices b)
-            :for z = (aref all-vertices c)
-            :for key = (list x y z)
-            :do (unless (gethash key seen) ; in case quickhull does not permit duplicate vertices
-                  (setf (gethash key seen) t)
-                  #+assertions (assert (loop :for k :below (/ (length all-vertices) 3)
-                                             :for v = (manifolds:v all-vertices k)
-                                             :thereis (v= v (dvec x y z))))
-                  (vector-push-extend x vertices)
-                  (vector-push-extend y vertices)
-                  (vector-push-extend z vertices))
-                (vector-push-extend j global-faces)))
+           (make-array 3 :element-type '(unsigned-byte 32) :adjustable t :fill-pointer 0))
+         ;; Quickhull doesn't like duplicate vertices so we take case
+         ;; of those here.
+         (seen (make-hash-table :test #'equal)))
+    (loop for i below vertex-count
+          for j = (aref faces i)
+          for a = (+ (* 3 j) 0)       ; global vertex indices
+          for b = (+ (* 3 j) 1)
+          for c = (+ (* 3 j) 2)
+          for x = (aref all-vertices a) ; TODO can we use manifold:v?
+          for y = (aref all-vertices b)
+          for z = (aref all-vertices c)
+          for key = (list x y z)
+          do (unless (gethash key seen)
+               (setf (gethash key seen) t)
+               #+assertions (assert (loop :for k :below (/ (length all-vertices) 3)
+                                          :for v = (manifolds:v all-vertices k)
+                                          :thereis (v= v (dvec x y z))))
+               (vector-push-extend x vertices)
+               (vector-push-extend y vertices)
+               (vector-push-extend z vertices))
+             (vector-push-extend j global-faces))
     (multiple-value-call #'make-convex-hull
       (org.shirakumo.fraf.quickhull:convex-hull vertices)
       vertex-index)))
@@ -306,6 +255,7 @@
             (coerce (subseq faces 0 (min 9 count)) 'list)
             (> count 9))))
 
+(defvar *winner*)  ; the link that was selecting for merging in the current step; for visualization
 (defun next-link (links)
   (loop with min = most-positive-double-float
         with min-link = NIL
@@ -314,12 +264,12 @@
         do (when (< cost min)
              (setf min (patch-link-merge-cost link))
              (setf min-link link))
-        finally (when min-link
-                  (format *trace-output* "=> ~5,2F ~A -- ~A => ~A~%"
-                          (patch-link-merge-cost min-link)
-                          (patch-debug-name (patch-link-a min-link))
-                          (patch-debug-name (patch-link-b min-link))
-                          (patch-debug-name (patch-link-merge-result min-link))))
+        finally #+no (when min-link
+                       (format *trace-output* "=> ~5,2F ~A -- ~A => ~A~%"
+                               (patch-link-merge-cost min-link)
+                               (patch-debug-name (patch-link-a min-link))
+                               (patch-debug-name (patch-link-b min-link))
+                               (patch-debug-name (patch-link-merge-result min-link))))
                 (setf *winner* min-link)
                 (return min-link)))
 
@@ -366,8 +316,9 @@
     (let ((i 1))
       (unwind-protect
            (loop for link = (progn
-                              (format *trace-output* "--------Step ~D | ~:D patch~:P ~D link~:P~%"
-                                      i (hash-table-count patches) (hash-table-count links))
+                              (when (zerop (mod i 100))
+                                (format *trace-output* "--------Step ~:D | ~:D patch~:P ~:D link~:P~%"
+                                        i (hash-table-count patches) (hash-table-count links)))
                               (next-link links))
                  while link   ; TODO for after while is not conforming
                  for patch1 = (patch-link-a link)

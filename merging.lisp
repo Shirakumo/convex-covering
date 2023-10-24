@@ -27,8 +27,9 @@
   (let ((valid
           (handler-case
               (let ((hull (patch-hull patch)))
-                (and (not (find-vertex-in-hull hull context))
+                (and ; (not (find-vertex-in-hull hull context))
                      (not (find-edge-in-hull hull context))
+                     #+TODO (normals-matching-p/overlap-per-facet patch hull context)
                      (normals-matching-p patch hull context)
                      (not (find-boundary-constraint-bar hull context))
                      (not (find-negative-side-touching-triangle hull))))
@@ -41,32 +42,20 @@
 
 ;;; Individual criteria
 
-(defun compute-facet-normals (hull) ; TODO these are just face normals for now
-  (loop :with hull-vertices = (vertices hull)
-        :with hull-faces = (faces hull)
-        :for face-index :below (/ (length hull-faces) 3)
-        :for face-vertex-index = (aref hull-faces (* 3 face-index))
-        :for face-vertex = (manifolds:v hull-vertices face-vertex-index)
-        :for face-normal = (vunit (manifolds:face-normal hull-vertices hull-faces face-index))
-        :for face-centroid = (manifolds:centroid hull-vertices (subseq hull-faces (* 3 face-index) (+ (* 3 face-index) 3)))
-        ; :when *debug-visualizations*
-          ; :do (push (cons face-centroid :facet-centroid) (problem hull))
-            ;   (debug-line face-centroid (v* face-normal .3) :facet-normal hull)
-        :collect (cons face-centroid face-normal)))
-
-(defun ensure-facet-normals (hull)
-  (or (face-normals hull)
-      (setf (face-normals hull) (compute-facet-normals hull))))
-
-(defun vertex-in-hull-p (vertex hull &key (eps -.0001))
-  (declare (type dvec3 vertex))
-  (loop :for (facet-centroid . facet-normal) :in (ensure-facet-normals hull) ; TODO rename face-normals -> %face-normals; ensure-face-normals -> face-normals
-        :always
+(defun vertex-in-hull-p (vertex hull &key (eps -.01))
+  (declare (type convex-hull hull)
+           (type dvec3 vertex))
+  (destructuring-bind (center . size/2) (ensure-bounding-box hull)
+    (declare (type vec3 center size/2))
+    (and (v<= (v- center size/2) (vec3 (vx vertex) (vy vertex) (vz vertex)) (v+ center size/2)) ; TODO avoid conversion
+         (loop :for (facet-centroid . facet-normal) :in (ensure-facet-normals hull) ; TODO rename face-normals -> %face-normals; ensure-face-normals -> face-normals
+               :always
                                         ; (minusp (v. facet-normal (v- vertex facet-centroid)))
                                         ; (not (> (v. facet-normal (v- vertex facet-centroid)) .0001))
-           (< (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid))) eps)))
+                  (< (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid))) eps)))))
 
 (defun find-vertex-in-hull (hull context)
+  (declare (optimize speed (safety 1) (debug 1)))
   (let* ((all-vertices (context-vertices context))
          (result (loop :with hull-faces = (global-faces hull)
                       :for vertex-index :from 0 :below (/ (length all-vertices) 3)
@@ -75,74 +64,72 @@
                                  (not (find vertex-index hull-faces))
                                  (vertex-in-hull-p vertex hull))
                         :do (push (cons vertex :bad) (annotations hull))
-                      :thereis (and (not (find vertex-index hull-faces))
-                                    (vertex-in-hull-p vertex hull)))))
+                      :thereis (and (vertex-in-hull-p vertex hull)
+                                    (not (find vertex-index hull-faces))))))
     (when result
       (setf (problem hull) :vertex))
     result))
 
+(defvar *overlap-counts* (make-array 0 :adjustable t :fill-pointer 0))
+
 (defun find-edge-in-hull (hull context)
-  (when (let* ((all-vertices (context-vertices context))
-               (all-faces (context-faces context))
+  (when (let ((all-vertices (context-vertices context))
+              (all-faces (context-faces context))
                                         ; (hull-faces (faces hull))
-               (hull-faces/global (global-faces hull)))
-          (space:do-overlapping (face-info (context-face-index context) hull nil)
-           ;; manifolds:do-faces (a b c all-faces nil) ; TODO tests some edges multiple times
-            (let #+no ()
-                 ((a (aref all-faces (+ (* 3 (face-info-index face-info)) 0)))
-                       (b (aref all-faces (+ (* 3 (face-info-index face-info)) 1)))
-                       (c (aref all-faces (+ (* 3 (face-info-index face-info)) 2))))
-             (progn
-               #+no (format *trace-output* "; [~A ~A ~A] vs hull ~A~%"
-                            a b c
-                            hull-faces/global
-                                        ; (not (not (search (vector a b c) hull-faces/global)))
-                            )
-               (when (and ; (not (search (vector a b c) hull-faces/global))
-                      (let (       ; (va (manifolds:v all-vertices a))
-                                        ; (vb (manifolds:v all-vertices b))
-                                        ; (vc (manifolds:v all-vertices c))
-                            )
-                        (flet ((edge-in-hull-p (vi1 vi2)
-                                 (let ((v1 (manifolds:v all-vertices vi1))
-                                       (v2 (manifolds:v all-vertices vi2)))
-                                   #+TODO (loop :for (facet-centroid . facet-normal) :in (ensure-facet-normals hull)
-                                         :thereis
+                                        ; (hull-faces/global (global-faces hull))
+              (overlapping (make-array 0 :adjustable t :fill-pointer 0)))
+          (unwind-protect
+               (space:do-overlapping (face-info (context-face-index context) hull nil)
+                 ;; manifolds:do-faces (a b c all-faces nil) ; TODO tests some edges multiple times
+                 (let* #+no ()
+                   ((face-index (face-info-index face-info))
+                    (a (aref all-faces (+ (* 3 face-index) 0)))
+                    (b (aref all-faces (+ (* 3 face-index) 1)))
+                    (c (aref all-faces (+ (* 3 face-index) 2))))
+                   (when (flet ((edge-in-hull-p (v1 v2)
+                                  (let ()
+                                    #+TODO (loop :for (facet-centroid . facet-normal) :in (ensure-facet-normals hull)
+                                                 :thereis
                                         ; (minusp (v. facet-normal (v- vertex facet-centroid)))
                                         ; (not (> (v. facet-normal (v- vertex facet-centroid)) .0001))
-                                            (< (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid))) eps))
-                                   (or (vertex-in-hull-p v1 hull)
-                                       (vertex-in-hull-p v2 hull)
-                                       (vertex-in-hull-p (v* (v+ v1 v2) .5d0) hull)))
+                                                    (< (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid))) eps))
+                                    (or (vertex-in-hull-p v1 hull)
+                                        (vertex-in-hull-p v2 hull)
+                                        (vertex-in-hull-p (v* (v+ v1 v2) .5d0) hull)))
 
-                                 #+old (and (not (let ((result (loop :for i :below (length hull-faces/global) :by 3
-                                                                     :thereis (and (find vi1 hull-faces/global :start i :end (+ i 3))
-                                                                                   (find vi2 hull-faces/global :start i :end (+ i 3))))))
-                                                   (when (and result *debug-visualizations*)
-                                                     (debug-line* (manifolds:v all-vertices vi1)
-                                                                  (manifolds:v all-vertices vi2)
-                                                                  :boundary-edge
-                                                                  hull :sample-count 13))
-                                                   result))
-                                            (loop :with v1 = (manifolds:v all-vertices vi1)
-                                                  :with v2 = (manifolds:v all-vertices vi2)
-                                                  :with bad = nil
-                                                  :with sample-count = 8
-                                                  :repeat sample-count
-                                                  :with d = (v/ (v- v2 v1) sample-count)
-                                                  :for v = (v+ v1 (v* d (/ .5d0 sample-count))) :then (v+ v d)
-                                                  :for in? = (vertex-in-hull-p v hull)
-                                                  :when in?
-                                                  :do (d  "; [~A ~A]~&;~2@T~A - ~A~&;~2@Tat ~A~%"
-                                                          vi1 vi2 v1 v2 v)
-                                                      (setf bad t)
+                                  #+old (and (not (let ((result (loop :for i :below (length hull-faces/global) :by 3
+                                                                      :thereis (and (find vi1 hull-faces/global :start i :end (+ i 3))
+                                                                                    (find vi2 hull-faces/global :start i :end (+ i 3))))))
+                                                    (when (and result *debug-visualizations*)
+                                                      (debug-line* (manifolds:v all-vertices vi1)
+                                                                   (manifolds:v all-vertices vi2)
+                                                                   :boundary-edge
+                                                                   hull :sample-count 13))
+                                                    result))
+                                             (loop :with v1 = (manifolds:v all-vertices vi1)
+                                                   :with v2 = (manifolds:v all-vertices vi2)
+                                                   :with bad = nil
+                                                   :with sample-count = 8
+                                                   :repeat sample-count
+                                                   :with d = (v/ (v- v2 v1) sample-count)
+                                                   :for v = (v+ v1 (v* d (/ .5d0 sample-count))) :then (v+ v d)
+                                                   :for in? = (vertex-in-hull-p v hull)
+                                                   :when in?
+                                                   :do (d  "; [~A ~A]~&;~2@T~A - ~A~&;~2@Tat ~A~%"
+                                                           vi1 vi2 v1 v2 v)
+                                                       (setf bad t)
                                         ; :do (push (cons v (if in? :bad :good)) (problem hull))
                                         ; :thereis (vertex-in-hull-p v hull all-vertices)
-                                                  :finally (return bad)))))
-                          (or (edge-in-hull-p a b)
-                              (edge-in-hull-p b c)
-                              (edge-in-hull-p c a)))))
-                 (return t))))))
+                                                   :finally (return bad)))))
+                           (let ((v1 (manifolds:v all-vertices a))
+                                 (v2 (manifolds:v all-vertices b))
+                                 (v3 (manifolds:v all-vertices c)))
+                             (or (edge-in-hull-p v1 v2)
+                                 (edge-in-hull-p v2 v3)
+                                 (edge-in-hull-p v3 v1))))
+                     (return t))))
+            ; (vector-push-extend (cons hull overlapping) *overlap-counts*)
+            ))
     (setf (problem hull) :edge)
     t))
 
@@ -174,7 +161,7 @@
                    (triangles-intersect-p h1 h2 h3 v1 v2 v3 :threshold threshold)))
     (or                    ; (face-matches-facet-p h1 h2 h3 v1 v2 v3)
      (multiple-value-bind (intersectp constellation contact)
-         (triangles-intersect-p h1 h2 h3 v1 v2 v3 :threshold .0001)
+         (triangles-intersect-p h1 h2 h3 v1 v2 v3 :threshold threshold)
        (declare (ignore intersectp))
        (and (eq constellation :coplanar) (eq contact :penetrating))))))
 
@@ -184,60 +171,116 @@
             (all-faces (context-faces context))
             (hull-vertices (vertices hull))
             (hull-faces (faces hull)))
-        (space:do-overlapping (face-info (context-face-index context) hull t)
-          ;; manifolds:do-faces (ia ib ic all-faces t)
+        (;; space:do-all (face-info (context-face-index context) t)
+         space:do-overlapping (face-info (context-face-index context) hull t)
+         ;; manifolds:do-faces (ia ib ic all-faces t)
           (let* #+no ()
             ((face-index (face-info-index face-info))
+             (face-normal (face-info-normal face-info))
              (ia (aref all-faces (+ (* 3 face-index) 0)))
              (ib (aref all-faces (+ (* 3 face-index) 1)))
-             (ic (aref all-faces (+ (* 3 face-index) 2))))
-            (let* ((a (manifolds:v all-vertices ia))
-                   (b (manifolds:v all-vertices ib))
-                   (c (manifolds:v all-vertices ic))
-                   (face-normal (vunit (vc (v- b a) (v- c a)))))
-              (let ()
-                (when (not (loop :for i :below (/ (length hull-faces) 3)
-                                 :for (facet-centroid . facet-normal) :in (face-normals hull)
-                                 :always (if (and (< (abs (- -1 (v. face-normal (the dvec3 facet-normal)))) .0001)
-                                                  (face-overlaps-or-matches-facet-p
-                                                   hull-vertices hull-faces i a b c :hull hull))
-                                             (let ( ; (*debug-output* t)
-                                                   )
-                                               (d "[~A ~A ~A] possibly intersects facet ~A~%"
-                                                  ia ib ic i)
-                                               (let ()
-                                                 (when *debug-visualizations*
-                                                   (debug-line* a b :face-edge hull)
-                                                   (debug-line* b c :face-edge hull)
-                                                   (debug-line* c a :face-edge hull)
-                                                   (let ((face-centroid (v/ (v+ a b c) 3)))
-                                                     (push (cons face-centroid :face-centroid) (annotations hull))
-                                                     (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)))
-                                                 (d "~2@Tface normal ~A~&~2@Tfacet normal ~A~&~2@T=> ~A~%"
-                                                    face-normal
-                                                    facet-normal
-                                                    (v. face-normal facet-normal))
-                                                 (cond (t ; (< (abs (- -1 (v. face-normal facet-normal))) .0001)
-                                                        (when *debug-visualizations*
-                                                          (debug-line facet-centroid face-normal :bad-normal hull)
-                                                          (debug-line facet-centroid facet-normal :bad-normal hull))
-                                                        nil)
-                                                       (t
-                                                        t))))
-                                             t)))
-                  (setf (problem hull) :normals)
-                  (return nil)))))))))
+             (ic (aref all-faces (+ (* 3 face-index) 2)))
+             (a (manifolds:v all-vertices ia))
+             (b (manifolds:v all-vertices ib))
+             (c (manifolds:v all-vertices ic))
+             ; (face-normal (vunit (vc (v- b a) (v- c a))))
+             )
+            (when (not (loop :for i :below (/ (length hull-faces) 3)
+                             :for (facet-centroid . facet-normal) :in (face-normals hull)
+                             :always (if (and (< (abs (- -1 (v. face-normal (the dvec3 facet-normal)))) .0001)
+                                              (face-overlaps-or-matches-facet-p
+                                               hull-vertices hull-faces i a b c :threshold .0001 :hull hull))
+                                         (let ( ; (*debug-output* t)
+                                               )
+                                           (d "[~A ~A ~A] possibly intersects facet ~A~%"
+                                              ia ib ic i)
+                                           (let ()
+                                             (when *debug-visualizations*
+                                               (debug-line* a b :face-edge hull)
+                                               (debug-line* b c :face-edge hull)
+                                               (debug-line* c a :face-edge hull)
+                                               (let ((face-centroid (v/ (v+ a b c) 3)))
+                                                 (push (cons face-centroid :face-centroid) (annotations hull))
+                                                 (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)))
+                                             (d "~2@Tface normal ~A~&~2@Tfacet normal ~A~&~2@T=> ~A~%"
+                                                face-normal
+                                                facet-normal
+                                                (v. face-normal facet-normal))
+                                             (cond (t ; (< (abs (- -1 (v. face-normal facet-normal))) .0001)
+                                                    (when *debug-visualizations*
+                                                      (debug-line facet-centroid face-normal :bad-normal hull)
+                                                      (debug-line facet-centroid facet-normal :bad-normal hull))
+                                                    nil)
+                                                   (t
+                                                    t))))
+                                         t)))
+              (setf (problem hull) :normals)
+              (return nil)))))))
+
+(defun normals-matching-p/overlap-per-facet (patch hull context)
+  (declare (optimize speed))
+  (or (<= (length (vertices hull)) (* 3 4)) ; HACK to work around degenerate 2D case
+      (let ((face-container (context-face-index context))
+            (all-vertices   (context-vertices context))
+            (all-faces      (context-faces context))
+            (hull-vertices  (vertices hull))
+            (hull-faces     (faces hull)))
+        (loop :for i :below (/ (length hull-faces) 3)
+              :for (facet-centroid . facet-normal) :in (face-normals hull)
+              :for facet-bounding-box = (face-bounding-box hull-vertices hull-faces i)
+              :always (space:do-all (face-info face-container t)
+                       ;; space:do-overlapping (face-info face-container facet-bounding-box t)
+                        (let ((face-normal (face-info-normal face-info)))
+                          (declare (type dvec3 face-normal))
+                          (when (< (abs (- -1 (v. face-normal (the dvec3 facet-normal)))) .0001)
+                            (let* ((face-index (face-info-index face-info))
+                                   (ia (aref all-faces (+ (* 3 face-index) 0)))
+                                   (ib (aref all-faces (+ (* 3 face-index) 1)))
+                                   (ic (aref all-faces (+ (* 3 face-index) 2)))
+                                   (a (manifolds:v all-vertices ia))
+                                   (b (manifolds:v all-vertices ib))
+                                   (c (manifolds:v all-vertices ic))
+                                   ;; (face-normal (vunit (vc (v- b a) (v- c a))))
+                                   )
+                              (when (face-overlaps-or-matches-facet-p
+                                     hull-vertices hull-faces i a b c :hull hull)
+                                (let (  ; (*debug-output* t)
+                                      )
+                                  (d "[~A ~A ~A] possibly intersects facet ~A~%"
+                                     ia ib ic i)
+                                  (let ()
+                                    (when *debug-visualizations*
+                                      (debug-line* a b :face-edge hull)
+                                      (debug-line* b c :face-edge hull)
+                                      (debug-line* c a :face-edge hull)
+                                      (let ((face-centroid (v/ (v+ a b c) 3)))
+                                        (push (cons face-centroid :face-centroid) (annotations hull))
+                                        (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)))
+                                    (d "~2@Tface normal ~A~&~2@Tfacet normal ~A~&~2@T=> ~A~%"
+                                       face-normal
+                                       facet-normal
+                                       (v. face-normal facet-normal))
+                                    (when *debug-visualizations*
+                                      (debug-line facet-centroid face-normal :bad-normal hull)
+                                      (debug-line facet-centroid facet-normal :bad-normal hull))
+                                    (return nil))))))))))))
 
 (defun find-boundary-constraint-bar (hull context)
-  (let ((all-vertices (context-vertices context))
+  ;; We get a permuted version of the face indices but the order
+  ;; (mod 3) and therefore the normal direction should be the same
+  ;; as for the original face (and the normal direction does not
+  ;; matter for boundary constraint bars anyway).
+  ;;
+  ;; The paper does not say how to scale constrain bars :(
+  (space:do-overlapping (info (context-boundary-edge-index context) hull nil)
+    (let ((bar1 (boundary-bar-info-bar1 info))
+          (bar2 (boundary-bar-info-bar2 info)))
+      (when (or (vertex-in-hull-p bar1 hull)
+                (vertex-in-hull-p bar2 hull)
+                (vertex-in-hull-p (v* (v+ bar1 bar2) .5d0) hull)))))
+  #+old (let ((all-vertices (context-vertices context))
         (all-faces (context-faces context))
         (hull-faces (faces hull)))
-    ;; We get a permuted version of the face indices but the order
-    ;; (mod 3) and therefore the normal direction should be the same
-    ;; as for the original face (and the normal direction does not
-    ;; matter for boundary constraint bars anyway).
-    ;;
-    ;; The paper does not say how to scale constrain bars :(
     (loop for edge across (context-boundary-edges context)
           for a = (manifolds:start edge)
           for b = (manifolds:end edge)
@@ -255,10 +298,9 @@
                            (n (vunit (vc (v- v2 v1) (v- v3 v1)))))
                        (debug-line c n :face-normal hull))
                (debug-line* bar1 bar2 :face-normal hull))
-          thereis (loop for i below (/ (length hull-faces) 3)
-                        thereis (or (vertex-in-hull-p bar1 hull)
-                                    (vertex-in-hull-p bar2 hull)
-                                    (vertex-in-hull-p (v* (v+ bar1 bar2) .5d0) hull))))))
+          thereis (or (vertex-in-hull-p bar1 hull)
+                      (vertex-in-hull-p bar2 hull)
+                      (vertex-in-hull-p (v* (v+ bar1 bar2) .5d0) hull)))))
 
 (defun find-negative-side-touching-triangle (hull)
   nil)
