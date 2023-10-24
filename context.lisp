@@ -24,6 +24,9 @@
         finally (return index)))
 
 ;;; Face index
+;;;
+;;; This allows efficiently finding faces that intersect a given
+;;; axis-aligned box.
 
 (defstruct (face-info
             (:constructor make-face-info (index center size/2 normal)))
@@ -52,6 +55,9 @@
     index))
 
 ;;; Boundary edge index
+;;;
+;;; This allows efficiently finding boundary constraint bars that
+;;; intersect a given axis-aligned box.
 
 (defstruct (boundary-bar-info
             (:constructor make-boundary-bar-info (bar1 bar2)))
@@ -87,7 +93,7 @@
 
 (defun index-boundary-edges (all-vertices boundary-edges)
   (let ((index (org.shirakumo.fraf.trial.space.kd-tree:make-kd-tree :dimensions 3)))
-    (loop for boundary-edge :across boundary-edges
+    (loop for boundary-edge across boundary-edges
           for (bar1 bar2) = (multiple-value-list (compute-boundary-bar
                                                   all-vertices boundary-edge))
           for info = (make-boundary-bar-info bar1 bar2)
@@ -96,6 +102,11 @@
     index))
 
 ;;; Context
+;;;
+;;; A context instance stores various pieces of information that are
+;;; needed for computing the convex decomposition such as vertices,
+;;; faces and (boundary) edges of the mesh being decomposed as well as
+;;; spatial index structures.
 
 (defstruct (context
             (:constructor make-context (vertices faces
