@@ -256,22 +256,30 @@
             (> count 9))))
 
 (defvar *winner*)  ; the link that was selecting for merging in the current step; for visualization
-(defun next-link (links)
-  (loop with min = most-positive-double-float
-        with min-link = NIL
-        for link being the hash-keys of links
-        for cost = (patch-link-merge-cost link)
-        do (when (< cost min)
-             (setf min (patch-link-merge-cost link))
-             (setf min-link link))
-        finally #+no (when min-link
-                       (format *trace-output* "=> ~5,2F ~A -- ~A => ~A~%"
-                               (patch-link-merge-cost min-link)
-                               (patch-debug-name (patch-link-a min-link))
-                               (patch-debug-name (patch-link-b min-link))
-                               (patch-debug-name (patch-link-merge-result min-link))))
-                (setf *winner* min-link)
-                (return min-link)))
+(defun next-link (queue links)
+  (let ((new-winner (loop for link = (damn-fast-priority-queue:dequeue queue)
+                          until (or (null link)
+                                    (and (gethash link links)
+                                         (< (patch-link-merge-cost link) most-positive-double-float)))
+                          finally (return link)))
+        #+old (old-winner (loop with min = most-positive-double-float
+                          with min-link = NIL
+                          for link being the hash-keys of links
+                          for cost = (patch-link-merge-cost link)
+                          do (when (< cost min)
+                               (setf min (patch-link-merge-cost link))
+                               (setf min-link link))
+                          finally #+no (when min-link
+                                         (format *trace-output* "=> ~5,2F ~A -- ~A => ~A~%"
+                                                 (patch-link-merge-cost min-link)
+                                                 (patch-debug-name (patch-link-a min-link))
+                                                 (patch-debug-name (patch-link-b min-link))
+                                                 (patch-debug-name (patch-link-merge-result min-link))))
+                                  (setf *winner* min-link)
+                                  (return min-link))))
+    #+old (unless (eq old-winner new-winner)
+      (break "~A" (cons old-winner new-winner)))
+    new-winner))
 
 (defun link-other-patch (link this-patch)
   (cond ((eq this-patch (patch-link-a link))
@@ -285,33 +293,43 @@
   (unless (zerop (mod (length indices) 3))
     (error "Total number of vertex indices in faces array is not a multiple of 3. Are all faces triangles?")))
 
+(defun merge-priority (link)
+  (let ((cost (patch-link-merge-cost link)))
+    (if (= cost most-positive-double-float)
+        (ash 1 31)
+        (the (unsigned-byte 32) (floor cost 1/10000000)))))
+
 (defun decompose (vertices indices &key) ; TODO indices -> faces
   (verify-input vertices indices)
   ;; FIXME: This is all really dumb and uses really bad data structures
   ;;        Could definitely be optimised a lot by someone smarter
   (let* ((context (make-context vertices indices))
-         (patchlist (make-array (truncate (length indices) 3)))
          (patches (make-hash-table :test 'eq))
          (links (make-hash-table :test 'eq))
-         (i 0)
+
+         (merge-queue (damn-fast-priority-queue:make-queue))
+
          (*winner* nil))
     ;; 1. Destructure the mesh into one patch per face
-    (manifolds:do-faces (a b c indices)
-      (let ((patch (make-patch vertices a b c)))
+    (let ((patchlist (make-array (truncate (length indices) 3)))
+          (i 0))
+      (manifolds:do-faces (a b c indices)
+        (let ((patch (make-patch vertices a b c)))
                                         ; (setf (patch-hull patch) (compute-patch-convex-hull vertices (patch-faces patch)))
-        (setf (gethash patch patches) T)
-        (setf (aref patchlist i) patch)
-        (incf i)))
-    ;; 2. Find neighbouring patches and create the links
-    (let ((*debug-visualizations* nil))
-      (let ((adjacents (manifolds:face-adjacency-list indices)))
-        (dotimes (face (length adjacents))
-          (loop for other in (aref adjacents face)
-                for link = (link-patches context
-                                         (aref patchlist face) (aref patchlist other))
-                when link
-                  do (setf (gethash link links) T)))))
-    (visualize-step patches 0)
+          (setf (gethash patch patches) T)
+          (setf (aref patchlist i) patch)
+          (incf i)))
+      ;; 2. Find neighbouring patches and create the links
+      (let ((*debug-visualizations* nil))
+        (let ((adjacents (manifolds:face-adjacency-list indices)))
+          (dotimes (face (length adjacents))
+            (loop for other in (aref adjacents face)
+                  for link = (link-patches context
+                                           (aref patchlist face) (aref patchlist other))
+                  when link
+                  do (setf (gethash link links) T)
+                     (damn-fast-priority-queue:enqueue merge-queue link (merge-priority link)))))))
+    ;; (visualize-step patches 0)
     ;; 3. Greedily merge patches according to merge cost
     (let ((i 1))
       (unwind-protect
@@ -319,7 +337,7 @@
                               (when (zerop (mod i 100))
                                 (format *trace-output* "--------Step ~:D | ~:D patch~:P ~:D link~:P~%"
                                         i (hash-table-count patches) (hash-table-count links)))
-                              (next-link links))
+                              (next-link merge-queue links))
                  while link   ; TODO for after while is not conforming
                  for patch1 = (patch-link-a link)
                  for patch2 = (patch-link-b link)
@@ -358,7 +376,8 @@
                       (assert (patch-hull patch))
                       (setf (gethash patch patches) T)
                       (loop for link across (patch-links patch)
-                            do (setf (gethash link links) T)))
+                            do (setf (gethash link links) T)
+                               (damn-fast-priority-queue:enqueue merge-queue link (merge-priority link))))
                  :do                    ; consistency check
                     #+no (let ((linked-patches (make-hash-table :test #'eq))
                                (seen (make-hash-table :test #'eq)))

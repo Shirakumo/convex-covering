@@ -22,7 +22,8 @@
   :depends-on ("manifolds"
                "3d-spaces"
                "quickhull"
-               "documentation-utils")
+               "damn-fast-priority-queue"
+               "documentation-utils"
   :in-order-to ((asdf:test-op (asdf:test-op "convex-covering/test"))))
 
 (defsystem "convex-covering/test"
