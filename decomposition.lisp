@@ -185,8 +185,9 @@
         (cond ((valid-patch-p patch context)
                (setf (patch-compactness patch) (compute-compactness all-vertices patch))
                patch)
-              (t                        ; TODO for debugging
-               hull))))))
+              (t
+               nil ; hull ; TODO(jmoringe): for debugging
+               ))))))
 
 (defstruct (patch-link
             (:constructor %make-patch-link (a b &optional merge-cost merge-result))
@@ -195,13 +196,12 @@
   (a NIL :type patch)
   (b NIL :type patch)
   (merge-cost most-positive-double-float :type double-float)
-  (merge-result NIL ; :type (or null patch)
-   ))
+  (merge-result NIL :type (or null patch)))
 
 (defun make-patch-link (context patch1 patch2)
   (assert (not (eq patch1 patch2)))
   (let ((result (make-merged-patch context patch1 patch2)))
-    (if (typep result 'patch)
+    (if result ; (typep result 'patch)
         (%make-patch-link patch1 patch2 (/ (patch-compactness result)) result)
         (%make-patch-link patch1 patch2 most-positive-double-float result))))
 
@@ -347,7 +347,8 @@
 
                  :do (when (debug-visualizations-p i)
                        ;; (valid-patch-p (patch-link-merge-result link) vertices indices)
-                       (visualize-step patches i :highlight patch))
+                       ;; (visualize-step patches i :highlight patch)
+                       )
                      #+no (when (= i 10)
                             (loop :for link :in (alexandria:hash-table-keys links)
                                   :for j :from 0
@@ -403,7 +404,8 @@
                     (incf i)
                  :finally (format *trace-output* "--------Result | ~:D patch~:P ~D link~:P~%"
                                   (hash-table-count patches) (hash-table-count links)))
-        (visualize-step (alexandria:hash-table-keys patches) i :final t)))
+        ;; (visualize-step (alexandria:hash-table-keys patches) i :final t)
+        ))
     ;; 4. Return the patches' convex hulls
     (let ((hulls (make-array (hash-table-count patches))))
       (loop for patch being the hash-keys of patches

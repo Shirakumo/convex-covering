@@ -24,22 +24,27 @@
                "quickhull"
                "damn-fast-priority-queue"
                "documentation-utils"
+
+               "cl-wavefront") ; TODO(jmoringe): temporary for debugging
   :in-order-to ((asdf:test-op (asdf:test-op "convex-covering/test"))))
 
 (defsystem "convex-covering/test"
-  :depends-on ("convex-covering"
-               "parachute"
-               "cl-wavefront")
+  :depends-on ("parachute"
+
+               "convex-covering"
+               "convex-covering/visualization")
   :components ((:file "test"))
   :perform (test-op (operation component)
-                    (uiop:symbol-call "ORG.SHIRAKUMO.FRAF.CONVEX-COVERING.TEST"
-                                      '#:decompose-test-files)))
+             (uiop:symbol-call "ORG.SHIRAKUMO.FRAF.CONVEX-COVERING.TEST"
+                               '#:decompose-test-files)))
 
 (defsystem "convex-covering/visualization"
   :depends-on ("alexandria"
+               "cl-wavefront"
                "cl-dot"
                "inferior-shell"
 
-               "convex-covering"
-               "convex-covering/test")
-  :components ((:file "visualization")))
+               "convex-covering")
+  :serial t
+  :components ((:file "export-hulls")
+               (:file "visualization")))
