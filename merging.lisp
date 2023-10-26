@@ -11,15 +11,15 @@
                   :do (debug-face* all-vertices (patch-faces patch) face-index :patch-edge hull :sample-count 11)))
 
           (let ((hull (patch-hull patch)))
-            (loop with hull-vertices = (vertices hull)
-                  with hull-faces = (facets hull)
+            (loop with hull-vertices = (hull-vertices hull)
+                  with hull-faces = (hull-facets hull)
                   for face-index below (/ (length hull-faces) 3)
                   for face-vertex-index = (aref hull-faces (* 3 face-index))
                   for face-vertex = (manifolds:v hull-vertices face-vertex-index)
                   for face-normal = (vunit (manifolds:face-normal hull-vertices hull-faces face-index))
                   for face-centroid = (manifolds:centroid hull-vertices (subseq hull-faces (* 3 face-index) (+ (* 3 face-index) 3)))
                   do (debug-face* hull-vertices hull-faces face-index :facet-edge hull :sample-count 12)
-                  do (push (cons face-centroid :facet-centroid) (annotations hull))
+                  do (push (cons face-centroid :facet-centroid) (hull-annotations hull))
                      (debug-line face-centroid (v* face-normal .2) :facet-normal hull :sample-count 11))))
       (floating-point-invalid-operation ()
         )))
@@ -37,13 +37,13 @@
               (format *error-output* "~a~%" error)
               NIL))))
     (d "; hull ~a is ~:[invalid~;valid~]"
-       (global-faces (patch-hull patch)) valid)
+       (hull-global-faces (patch-hull patch)) valid)
     valid))
 
 ;;; Individual criteria
 
 (defun vertex-in-hull-p (vertex hull &key (eps -.01))
-  (declare (type convex-hull hull)
+  (declare (type hull hull)
            (type dvec3 vertex))
   (destructuring-bind (center . size/2) (bounding-box hull)
     (declare (type vec3 center size/2))
@@ -55,24 +55,26 @@
                   (< (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid))) eps)))))
 
 (defun find-vertex-in-hull (hull context)
-  (declare (optimize speed (safety 1) (debug 1)))
+  (declare (type hull hull)
+           (optimize speed (safety 1) (debug 1)))
   (let* ((all-vertices (context-vertices context))
-         (result (loop with hull-faces = (global-faces hull)
+         (result (loop with hull-faces = (hull-global-faces hull)
                        for vertex-index from 0 below (/ (length all-vertices) 3)
                        for vertex = (manifolds:v all-vertices vertex-index)
                        when (and *debug-visualizations*
                                  (not (find vertex-index hull-faces))
                                  (vertex-in-hull-p vertex hull))
-                         do (push (cons vertex :bad) (annotations hull))
+                         do (push (cons vertex :bad) (hull-annotations hull))
                       thereis (and (vertex-in-hull-p vertex hull)
                                    (not (find vertex-index hull-faces))))))
     (when result
-      (setf (problem hull) :vertex))
+      (setf (hull-problem hull) :vertex))
     result))
 
 (defvar *overlap-counts* (make-array 0 :adjustable T :fill-pointer 0))
 
 (defun find-edge-in-hull (hull context)
+  (declare (type hull hull))
   (when (let ((all-vertices (context-vertices context))
               (all-faces (context-faces context))
                                         ; (hull-faces (facets hull))
@@ -130,7 +132,7 @@
                      (return T))))
             ; (vector-push-extend (cons hull overlapping) *overlap-counts*)
             ))
-    (setf (problem hull) :edge)
+    (setf (hull-problem hull) :edge)
     T))
 
 #+unused (defun face-matches-facet-p (h1 h2 h3 v1 v2 v3
@@ -166,65 +168,67 @@
        (and (eq constellation :coplanar) (eq contact :penetrating))))))
 
 (defun normals-matching-p (patch hull context)
-  (or (<= (length (vertices hull)) (* 3 4)) ; HACK to work around degenerate 2D case
+  (declare (type hull hull))
+  (or (<= (length (hull-vertices hull)) (* 3 4)) ; HACK to work around degenerate 2D case
       (let ((all-vertices (context-vertices context))
             (all-faces (context-faces context))
-            (hull-vertices (vertices hull))
-            (hull-faces (facets hull)))
+            (hull-vertices (hull-vertices hull))
+            (hull-faces (hull-facets hull)))
         (;; space:do-all (face-info (context-face-index context) T)
          space:do-overlapping (face-info (context-face-index context) hull T)
-         ;; manifolds:do-faces (ia ib ic all-faces T)
-          (let* #+no ()
-            ((face-index (face-info-index face-info))
-             (face-normal (face-info-normal face-info))
-             (ia (aref all-faces (+ (* 3 face-index) 0)))
-             (ib (aref all-faces (+ (* 3 face-index) 1)))
-             (ic (aref all-faces (+ (* 3 face-index) 2)))
-             (a (manifolds:v all-vertices ia))
-             (b (manifolds:v all-vertices ib))
-             (c (manifolds:v all-vertices ic))
-             ; (face-normal (vunit (vc (v- b a) (v- c a))))
-             )
-            (when (not (loop for i below (/ (length hull-faces) 3)
-                             for (facet-centroid . facet-normal) in (facet-normals hull)
-                             always (if (and (< (abs (- -1 (v. face-normal (the dvec3 facet-normal)))) .0001)
-                                             (face-overlaps-or-matches-facet-p
-                                              hull-vertices hull-faces i a b c :threshold .0001 :hull hull))
-                                        (let ( ; (*debug-output* T)
-                                              )
-                                          (d "[~a ~a ~a] possibly intersects facet ~a~%"
-                                             ia ib ic i)
-                                          (let ()
-                                            (when *debug-visualizations*
-                                              (debug-line* a b :face-edge hull)
-                                              (debug-line* b c :face-edge hull)
-                                              (debug-line* c a :face-edge hull)
-                                              (let ((face-centroid (v/ (v+ a b c) 3)))
-                                                (push (cons face-centroid :face-centroid) (annotations hull))
-                                                (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)))
-                                            (d "~2@tface normal ~a~&~2@tfacet normal ~a~&~2@t=> ~a~%"
-                                               face-normal
-                                               facet-normal
-                                               (v. face-normal facet-normal))
-                                            (cond (T ; (< (abs (- -1 (v. face-normal facet-normal))) .0001)
-                                                   (when *debug-visualizations*
-                                                     (debug-line facet-centroid face-normal :bad-normal hull)
-                                                     (debug-line facet-centroid facet-normal :bad-normal hull))
-                                                   NIL)
-                                                  (T
-                                                   T))))
-                                         T)))
-              (setf (problem hull) :normals)
-              (return NIL)))))))
+          ;; manifolds:do-faces (ia ib ic all-faces T)
+         (let* #+no ()
+           ((face-index (face-info-index face-info))
+            (face-normal (face-info-normal face-info))
+            (ia (aref all-faces (+ (* 3 face-index) 0)))
+            (ib (aref all-faces (+ (* 3 face-index) 1)))
+            (ic (aref all-faces (+ (* 3 face-index) 2)))
+            (a (manifolds:v all-vertices ia))
+            (b (manifolds:v all-vertices ib))
+            (c (manifolds:v all-vertices ic))
+                                        ; (face-normal (vunit (vc (v- b a) (v- c a))))
+            )
+           (when (not (loop for i below (/ (length hull-faces) 3)
+                            for (facet-centroid . facet-normal) in (facet-normals hull)
+                            always (if (and (< (abs (- -1 (v. face-normal (the dvec3 facet-normal)))) .0001)
+                                            (face-overlaps-or-matches-facet-p
+                                             hull-vertices hull-faces i a b c :threshold .0001 :hull hull))
+                                       (let ( ; (*debug-output* T)
+                                             )
+                                         (d "[~a ~a ~a] possibly intersects facet ~a~%"
+                                            ia ib ic i)
+                                         (let ()
+                                           (when *debug-visualizations*
+                                             (debug-line* a b :face-edge hull)
+                                             (debug-line* b c :face-edge hull)
+                                             (debug-line* c a :face-edge hull)
+                                             (let ((face-centroid (v/ (v+ a b c) 3)))
+                                               (push (cons face-centroid :face-centroid) (hull-annotations hull))
+                                               (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)))
+                                           (d "~2@tface normal ~a~&~2@tfacet normal ~a~&~2@t=> ~a~%"
+                                              face-normal
+                                              facet-normal
+                                              (v. face-normal facet-normal))
+                                           (cond (T ; (< (abs (- -1 (v. face-normal facet-normal))) .0001)
+                                                  (when *debug-visualizations*
+                                                    (debug-line facet-centroid face-normal :bad-normal hull)
+                                                    (debug-line facet-centroid facet-normal :bad-normal hull))
+                                                  NIL)
+                                                 (T
+                                                  T))))
+                                       T)))
+             (setf (hull-problem hull) :normals)
+             (return NIL)))))))
 
 (defun normals-matching-p/overlap-per-facet (patch hull context)
-  (declare (optimize speed))
-  (or (<= (length (vertices hull)) (* 3 4)) ; HACK to work around degenerate 2D case
+  (declare (type hull hull)
+           (optimize speed))
+  (or (<= (length (hull-vertices hull)) (* 3 4)) ; HACK to work around degenerate 2D case
       (let ((face-container (context-face-index context))
             (all-vertices   (context-vertices context))
             (all-faces      (context-faces context))
-            (hull-vertices  (vertices hull))
-            (hull-faces     (facets hull)))
+            (hull-vertices  (hull-vertices hull))
+            (hull-faces     (hull-facets hull)))
         (loop for i below (/ (length hull-faces) 3)
               for (facet-centroid . facet-normal) in (facet-normals hull)
               for facet-bounding-box = (face-bounding-box hull-vertices hull-faces i)
@@ -254,7 +258,7 @@
                                       (debug-line* b c :face-edge hull)
                                       (debug-line* c a :face-edge hull)
                                       (let ((face-centroid (v/ (v+ a b c) 3)))
-                                        (push (cons face-centroid :face-centroid) (annotations hull))
+                                        (push (cons face-centroid :face-centroid) (hull-annotations hull))
                                         (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)))
                                     (d "~2@Tface normal ~A~&~2@Tfacet normal ~A~&~2@T=> ~A~%"
                                        face-normal
@@ -308,6 +312,8 @@
 ;;; Merge score
 
 (defun compute-compactness (all-vertices patch)
+  (declare (type (manifolds:vertex-array manifolds:f64) all-vertices)
+           (type patch patch))
   (assert (< (abs (- (manifolds:surface-area all-vertices (patch-faces patch))
                      (patch-surface-area patch)))
              .0001))

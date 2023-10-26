@@ -8,7 +8,7 @@
                  for i :from 0
                  for color = (if colors
                                  (funcall colors i)
-                                 (color<-faces (global-faces hull)))
+                                 (color<-faces (hull-global-faces hull)))
                  for name = (format NIL "patch~a" i)
                  for mtl = (apply #'make-instance 'org.shirakumo.fraf.wavefront:material
                                   :name name
@@ -18,7 +18,7 @@
                  for mesh = (make-instance 'org.shirakumo.fraf.wavefront:mesh
                                            :name name
                                            :vertex-data (vertices hull)
-                                           :index-data (facets hull)
+                                           :index-data (faces hull)
                                            :attributes '(:position)
                                            :material mtl)
                  collect mesh)
@@ -54,7 +54,7 @@
                                              :diffuse-factor #(0.7 0.7 1.0)))
                    (annotation-count 0))
                (loop :with hull = (patch-hull highlight)
-                     :for (vertex . kind) :in (remove :face-centroid (annotations hull) :key #'cdr)
+                     :for (vertex . kind) :in (remove :face-centroid (hull-annotations hull) :key #'cdr)
                      :for (color offset sample-count)
                         = (multiple-value-list
                            (ecase kind

@@ -5,24 +5,32 @@
 
 (in-package #:org.shirakumo.fraf.convex-covering)
 
+;;; `hull'
 ;;;
+;;; Internal data structure for representing convex hulls during the
+;;; decomposition computation. In contrast to the `convex-hull' type which is part of the API, this structure type
+;;;
+;;; 1. Stores vertex data using a concrete (double-float)
+;;;    representation where `convex-hull' mirrors the component type
+;;;    supplied by the caller
+;;;
+;;; 2. Stores additional information such as normals and bounding boxes
 
-(defstruct (convex-hull
-            (:constructor %make-convex-hull (vertices facets global-faces))
-            (:conc-name NIL)
+(defstruct (hull
+            (:constructor %make-hull (vertices facets global-faces))
             (:copier NIL)
             (:predicate NIL))
-  (vertices       (error "required") :type (manifolds:vertex-array manifolds:f64) :read-only T)
-  (facets         (error "required") :type manifolds:face-array :read-only T)
-  (%facet-normals '())
-  (%bounding-box  NIL :type (or null cons)) ; (location . size/2) ; TODO maybe store 3d-space:region directly
+  (vertices      (error "required") :type (manifolds:vertex-array manifolds:f64) :read-only T)
+  (facets        (error "required") :type manifolds:face-array :read-only T)
+  (facet-normals '())
+  (bounding-box  NIL :type (or null cons)) ; (location . size/2) ; TODO maybe store 3d-space:region directly
   ;; Maybe essential
-  (global-faces   #() :type manifolds:face-array :read-only T)
+  (global-faces  #() :type manifolds:face-array :read-only T)
   ;; Debugging
-  (annotations    '() :type list)
-  (problem        NIL))
+  (annotations   '() :type list)
+  (problem       NIL))
 
-(defun make-convex-hull (vertices faces vertex-index)
+(defun make-hull (vertices faces vertex-index)
   (let ((global-faces (make-array 0 :element-type 'manifolds:u32
                                     :adjustable T
                                     :fill-pointer 0)) ; TODO remove adjust-ability before returning?
@@ -38,13 +46,13 @@
           (vector-push-extend a/gi global-faces)
           (vector-push-extend b/gi global-faces)
           (vector-push-extend c/gi global-faces))))
-    (%make-convex-hull vertices faces (make-array (length global-faces)
-                                                  :element-type 'manifolds:u32
-                                                  :initial-contents global-faces))))
+    (%make-hull vertices faces (make-array (length global-faces)
+                                           :element-type 'manifolds:u32
+                                           :initial-contents global-faces))))
 
 (defun compute-facet-normals (hull) ; TODO(jmoringe) these are just face normals for now
-  (loop with vertices = (vertices hull)
-        with faces = (facets hull)
+  (loop with vertices = (hull-vertices hull)
+        with faces = (hull-facets hull)
         for index below (/ (length faces) 3)
         for normal = (vunit (manifolds:face-normal vertices faces index))
         for centroid = (manifolds:centroid vertices (subseq faces (* 3 index) (+ (* 3 index) 3)))
@@ -55,13 +63,13 @@
 
 (declaim (inline facet-normals))
 (defun facet-normals (hull)
-  (or (%facet-normals hull)
-      (setf (%facet-normals hull) (compute-facet-normals hull))))
+  (or (hull-facet-normals hull)
+      (setf (hull-facet-normals hull) (compute-facet-normals hull))))
 
 (defun compute-bounding-box (hull)
-  (check-type hull convex-hull)
-  (let* ((vertices (vertices hull))
-         (faces (facets hull))
+  (check-type hull hull)
+  (let* ((vertices (hull-vertices hull))
+         (faces (hull-facets hull))
          (min (dvec (aref vertices 0) (aref vertices 1) (aref vertices 2)))
          (max min))
     (declare (type dvec3 min max))
@@ -75,20 +83,20 @@
 
 (declaim (inline bounding-box))
 (defun bounding-box (hull)
-  (or (%bounding-box hull)
-      (setf (%bounding-box hull)
+  (or (hull-bounding-box hull)
+      (setf (hull-bounding-box hull)
             (multiple-value-call #'cons (compute-bounding-box hull)))))
 
 (defun facet-bounding-box (hull facet-index)
-  (check-type hull convex-hull)
-  (face-bounding-box (vertices hull) (facets hull) facet-index))
+  (check-type hull hull)
+  (face-bounding-box (hull-vertices hull) (hull-facets hull) facet-index))
 
 ;;; Interface for 3d-spaces containers
 
-(defmethod space:location ((object convex-hull))
+(defmethod space:location ((object hull))
   (car (bounding-box object)))
 
-(defmethod space:bsize ((object convex-hull))
+(defmethod space:bsize ((object hull))
   (cdr (bounding-box object)))
 
 ;;; patch
@@ -98,7 +106,7 @@
             (:copier NIL)
             (:predicate NIL))
   (faces #() :type manifolds:face-array :read-only T)
-  (hull NIL :type (or null convex-hull))
+  (hull NIL :type (or null hull))
   (links (make-array 0 :adjustable T :fill-pointer T) :type vector)
   (surface-area (error "required") :type double-float :read-only T)
   (compactness 0.0d0 :type double-float))
@@ -134,7 +142,7 @@
                (vector-push-extend y vertices)
                (vector-push-extend z vertices))
              (vector-push-extend j global-faces))
-    (multiple-value-call #'make-convex-hull
+    (multiple-value-call #'make-hull
       (org.shirakumo.fraf.quickhull:convex-hull vertices)
       vertex-index)))
 
@@ -309,18 +317,64 @@
         (T
          (error "corrupt link"))))
 
-(declaim (inline verify-input))
-(defun verify-input (vertices indices)
+;;; Interface
+
+(defstruct (convex-hull
+            (:constructor make-convex-hull (vertices faces))
+            (:conc-name NIL)
+            (:copier NIL)
+            (:predicate NIL))
+  (vertices (error "required") :type manifolds:vertex-array :read-only T)
+  (faces    (error "required") :type manifolds:face-array :read-only T))
+
+(defun make-convex-hull-from-hull (vertex-component-type hull)
+  (let* ((hull-vertices (hull-vertices hull))
+         (vertices (ecase vertex-component-type
+                     (manifolds:f32
+                      (map-into (make-array (length hull-vertices) :element-type 'manifolds:f32)
+                                (lambda (component) (coerce component 'manifolds:f32))
+                                hull-vertices))
+                     (manifolds:f64
+                      hull-vertices)))
+         (faces (hull-facets hull)))
+    (make-convex-hull vertices faces)))
+
+(declaim (inline check-input))
+(defun check-input (vertices indices)
   (check-type vertices manifolds:vertex-array)
   (check-type indices manifolds:face-array)
   (unless (zerop (mod (length indices) 3))
     (error "Total number of vertex indices in faces array is not a multiple of 3. Are all faces triangles?")))
 
+(defun determine-vertex-component-type (vertices)
+  (let ((element-type (array-element-type vertices)))
+    (flet ((type= (type1 type2)
+             (and (subtypep type1 type2) (subtypep type2 type1))))
+      (cond ((type= element-type 'manifolds:f32)
+             'manifolds:f32)
+            ((type= element-type 'manifolds:f64)
+             'manifolds:f64)
+            (t
+             ;; Should not happen since `check-input' checks the
+             ;; vertex array.
+             (error "Unsupported vertex component type ~s" element-type))))))
+
+(defun coerce-input (vertices vertex-component-type)
+  (ecase vertex-component-type
+    (manifolds:f32
+     (map-into (make-array (length vertices) :element-type 'manifolds:f64)
+               (lambda (component) (coerce component 'manifolds:f64))
+               vertices))
+    (manifolds:f64
+     vertices)))
+
 (defun decompose (vertices indices &key) ; TODO(jmoringe) indices -> faces
-  (verify-input vertices indices)
+  (check-input vertices indices)
   ;; FIXME: This is all really dumb and uses really bad data structures
   ;;        Could definitely be optimised a lot by someone smarter
-  (let* ((context (make-context vertices indices))
+  (let* ((vertex-component-type (determine-vertex-component-type vertices))
+         (vertices (coerce-input vertices vertex-component-type))
+         (context (make-context vertices indices))
          (patches (make-hash-table :test 'eq))
          (links (make-hash-table :test 'eq))
 
@@ -424,9 +478,10 @@
         ;; (visualize-step (alexandria:hash-table-keys patches) i :final T)
         ))
     ;; 4. Return the patches' convex hulls
-    (let ((hulls (make-array (hash-table-count patches))))
-      (loop for patch being the hash-keys of patches
-            for i from 0
-            do (setf (aref hulls i) (patch-hull patch)))
-      (remove NIL hulls)                ; TODO(jmoringe): temp hack
-      )))
+    (loop with hulls = (make-array (hash-table-count patches))
+          for i from 0
+          for patch being the hash-keys of patches
+          for hull = (patch-hull patch)
+          do (setf (aref hulls i) (when hull ; TODO(jmoringe): can we avoid storing those patches in the first place?
+                                    (make-convex-hull-from-hull vertex-component-type hull)))
+          finally (return (remove nil hulls)))))

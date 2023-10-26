@@ -102,7 +102,7 @@
   (loop :with d = (v/ direction (float sample-count 1.0d0))
         :repeat sample-count
         :for v = from :then (v+ v d)
-        :do (push (cons v kind) (annotations hull))))
+        :do (push (cons v kind) (hull-annotations hull))))
 
 (defun debug-line* (from to kind hull &rest args &key sample-count)
   (declare (ignore sample-count))
@@ -142,7 +142,7 @@
 (defmethod cl-dot:graph-object-node ((graph decomposition) (object patch))
   (let* ((index (position object (order graph)))
          (color (when index
-                  (color<-faces (global-faces (patch-hull object)))
+                  (color<-faces (hull-global-faces (patch-hull object)))
                   ; (funcall (colors graph) index)
                   ))
          (label (patch-debug-name object)))
@@ -166,7 +166,7 @@
                                       (t
                                        "red")))
                     (label      (when (typep result 'convex-hull)
-                                  (format nil "~(~A~)" (problem result))))
+                                  (format nil "~(~A~)" (hull-problem result))))
                     (width      (if (eq link *winner*) 5 nil))
                     (attributes `(:color ,color
                                   ,@(when width
@@ -231,7 +231,7 @@
 
 (defun visualize-problem (link i j)
   (return-from visualize-problem nil)
-  (let* ((problem        (problem (patch-link-merge-result link)))
+  (let* ((problem        (hull-problem (patch-link-merge-result link)))
          (debug-name1    (patch-debug-name (patch-link-a link) :format "~{~D-~D-~D~^_~}~@[__~]"))
          (debug-name2    (patch-debug-name (patch-link-b link) :format "~{~D-~D-~D~^_~}~@[__~]"))
          (base-name      (format nil "problem-~3,'0D/~A---~A-~A" i debug-name1 debug-name2 problem))
