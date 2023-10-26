@@ -18,7 +18,7 @@
                  for mesh = (make-instance 'org.shirakumo.fraf.wavefront:mesh
                                            :name name
                                            :vertex-data (vertices hull)
-                                           :index-data (faces hull)
+                                           :index-data (facets hull)
                                            :attributes '(:position)
                                            :material mtl)
                  collect mesh)

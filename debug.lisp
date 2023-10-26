@@ -2,14 +2,14 @@
 
 ;;; Variables
 
-(defvar *debug-output* nil)
+(defvar *debug-output* NIL)
 
-(defvar *debug-visualizations* nil)
+(defvar *debug-visualizations* '())
 
 (defun debug-visualizations-p (i)
   (etypecase *debug-visualizations*
     (null
-     nil)
+     NIL)
     (integer
      (zerop (mod i *debug-visualizations*)))
     (function

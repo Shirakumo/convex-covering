@@ -8,23 +8,23 @@
 ;;;
 
 (defstruct (convex-hull
-            (:constructor %make-convex-hull (vertices faces global-faces))
+            (:constructor %make-convex-hull (vertices facets global-faces))
             (:conc-name NIL)
             (:copier NIL)
             (:predicate NIL))
-  (vertices     #() :type (manifolds:vertex-array double-float)) ; TODO some are read-only
-  (faces        #() :type manifolds:face-array)
-  (face-normals '())                    ; TODO facet normals
-  (bounding-box nil :type (or null cons)) ; (location . size/2) ; TODO maybe store 3d-space:region directly
+  (vertices       (error "required") :type (manifolds:vertex-array manifolds:f64) :read-only T)
+  (facets         (error "required") :type manifolds:face-array :read-only T)
+  (%facet-normals '())
+  (%bounding-box  NIL :type (or null cons)) ; (location . size/2) ; TODO maybe store 3d-space:region directly
   ;; Maybe essential
-  (global-faces #() :type manifolds:face-array)
+  (global-faces   #() :type manifolds:face-array :read-only T)
   ;; Debugging
-  (annotations '() :type list)
-  (problem     nil))
+  (annotations    '() :type list)
+  (problem        NIL))
 
 (defun make-convex-hull (vertices faces vertex-index)
   (let ((global-faces (make-array 0 :element-type 'manifolds:u32
-                                    :adjustable t
+                                    :adjustable T
                                     :fill-pointer 0)) ; TODO remove adjust-ability before returning?
         )
     (manifolds:do-faces (a/li b/li c/li faces)
@@ -42,27 +42,26 @@
                                                   :element-type 'manifolds:u32
                                                   :initial-contents global-faces))))
 
-(defun compute-facet-normals (hull) ; TODO these are just face normals for now
-  (loop :with hull-vertices = (vertices hull)
-        :with hull-faces = (faces hull)
-        :for face-index :below (/ (length hull-faces) 3)
-        ; :for face-vertex-index = (aref hull-faces (* 3 face-index))
-        ; :for face-vertex = (manifolds:v hull-vertices face-vertex-index)
-        :for face-normal = (vunit (manifolds:face-normal hull-vertices hull-faces face-index))
-        :for face-centroid = (manifolds:centroid hull-vertices (subseq hull-faces (* 3 face-index) (+ (* 3 face-index) 3)))
-                                        ; :when *debug-visualizations*
-                                        ; :do (push (cons face-centroid :facet-centroid) (problem hull))
-                                        ;   (debug-line face-centroid (v* face-normal .3) :facet-normal hull)
-        :collect (cons face-centroid face-normal)))
+(defun compute-facet-normals (hull) ; TODO(jmoringe) these are just face normals for now
+  (loop with vertices = (vertices hull)
+        with faces = (facets hull)
+        for index below (/ (length faces) 3)
+        for normal = (vunit (manifolds:face-normal vertices faces index))
+        for centroid = (manifolds:centroid vertices (subseq faces (* 3 index) (+ (* 3 index) 3)))
+        ;; :when *debug-visualizations*
+        ;;   :do (push (cons centroid :facet-centroid) (problem hull))
+        ;;       (debug-line centroid (v* normal .3) :facet-normal hull)
+        collect (cons centroid normal)))
 
-(defun ensure-facet-normals (hull)
-  (or (face-normals hull)
-      (setf (face-normals hull) (compute-facet-normals hull))))
+(declaim (inline facet-normals))
+(defun facet-normals (hull)
+  (or (%facet-normals hull)
+      (setf (%facet-normals hull) (compute-facet-normals hull))))
 
 (defun compute-bounding-box (hull)
   (check-type hull convex-hull)
   (let* ((vertices (vertices hull))
-         (faces (faces hull))
+         (faces (facets hull))
          (min (dvec (aref vertices 0) (aref vertices 1) (aref vertices 2)))
          (max min))
     (declare (type dvec3 min max))
@@ -70,34 +69,38 @@
       (let ((v1 (manifolds:v vertices a))
             (v2 (manifolds:v vertices b))
             (v3 (manifolds:v vertices c)))
-        (setf min (vmin min v1 v2 v3) ; TODO can use destructive destructive (but make max separate, then)
+        (setf min (vmin min v1 v2 v3) ; TODO(jmoringe): can use destructive destructive (but make max separate, then)
               max (vmax max v1 v2 v3))))
     (center-and-size-from-min-and-max min max)))
 
-(declaim (inline ensure-bounding-box))
-(defun ensure-bounding-box (hull)
-  (or (bounding-box hull)
-      (setf (bounding-box hull)
+(declaim (inline bounding-box))
+(defun bounding-box (hull)
+  (or (%bounding-box hull)
+      (setf (%bounding-box hull)
             (multiple-value-call #'cons (compute-bounding-box hull)))))
-
-(defmethod space:location ((object convex-hull))
-  (car (ensure-bounding-box object)))
-
-(defmethod space:bsize ((object convex-hull))
-  (cdr (ensure-bounding-box object)))
 
 (defun facet-bounding-box (hull facet-index)
   (check-type hull convex-hull)
-  (face-bounding-box (vertices hull) (faces hull) facet-index))
+  (face-bounding-box (vertices hull) (facets hull) facet-index))
+
+;;; Interface for 3d-spaces containers
+
+(defmethod space:location ((object convex-hull))
+  (car (bounding-box object)))
+
+(defmethod space:bsize ((object convex-hull))
+  (cdr (bounding-box object)))
+
+;;; patch
 
 (defstruct (patch
             (:constructor %make-patch (faces &optional surface-area hull))
             (:copier NIL)
             (:predicate NIL))
-  (faces #() :type manifolds:face-array)
+  (faces #() :type manifolds:face-array :read-only T)
   (hull NIL :type (or null convex-hull))
   (links (make-array 0 :adjustable T :fill-pointer T) :type vector)
-  (surface-area (error "required") :type double-float)
+  (surface-area (error "required") :type double-float :read-only T)
   (compactness 0.0d0 :type double-float))
 
 (defun make-patch (all-vertices a b c)
@@ -108,16 +111,14 @@
 
 (defun compute-patch-convex-hull (all-vertices faces vertex-index)
   (let* ((vertex-count (length faces))
-         (vertices ; (make-array (* 3 vertex-count) :element-type 'double-float)
-           (make-array 3 :element-type 'double-float :adjustable t :fill-pointer 0))
-         (global-faces
-           (make-array 3 :element-type '(unsigned-byte 32) :adjustable t :fill-pointer 0))
          ;; Quickhull doesn't like duplicate vertices so we take case
          ;; of those here.
+         (vertices (make-array 3 :element-type 'manifolds:f64 :adjustable T :fill-pointer 0))
+         (global-faces (make-array 3 :element-type 'manifolds:u32 :adjustable T :fill-pointer 0))
          (seen (make-hash-table :test #'equal)))
     (loop for i below vertex-count
           for j = (aref faces i)
-          for a = (+ (* 3 j) 0)       ; global vertex indices
+          for a = (+ (* 3 j) 0) ; global vertex indices
           for b = (+ (* 3 j) 1)
           for c = (+ (* 3 j) 2)
           for x = (aref all-vertices a) ; TODO can we use manifold:v?
@@ -125,7 +126,7 @@
           for z = (aref all-vertices c)
           for key = (list x y z)
           do (unless (gethash key seen)
-               (setf (gethash key seen) t)
+               (setf (gethash key seen) T)
                #+assertions (assert (loop :for k :below (/ (length all-vertices) 3)
                                           :for v = (manifolds:v all-vertices k)
                                           :thereis (v= v (dvec x y z))))
@@ -160,34 +161,45 @@
   (let* ((surface-area (+ (patch-surface-area a) (patch-surface-area b))) ; TODO only when valid
          (faces1 (patch-faces a))
          (faces2 (patch-faces b))
-         (faces (make-array (length faces1) :element-type 'manifolds:u32 :adjustable t :fill-pointer 0))
+         (faces (make-array (length faces1) :element-type 'manifolds:u32 :adjustable T :fill-pointer 0))
          (seen (make-hash-table :test #'equal)))
-    (flet ((add-face (a b c) ; TODO check whether duplicates can actually occur
+    (flet ((add-face (a b c) ; TODO(jmoringe) check whether duplicates can actually occur
              (let ((key (list a b c)))
                (unless (gethash key seen)
-                 (setf (gethash key seen) t)
+                 (setf (gethash key seen) T)
                  (vector-push-extend a faces)
                  (vector-push-extend b faces)
                  (vector-push-extend c faces)))))
       (manifolds:do-faces (a b c faces1) (add-face a b c))
       (manifolds:do-faces (a b c faces2) (add-face a b c))
-      (d "; Merged ~D + ~D = ~D face~:P into ~D~%"
+      (d "; Merged ~d + ~d = ~d face~:p into ~d~%"
          (length faces1) (length faces2)
          (+ (length faces1) (length faces2))
          (length faces)))
     (setf faces (make-array (length faces) :element-type 'manifolds:u32
                                            :initial-contents faces))
     (let ((all-vertices (context-vertices context)))
-      (unless (= (length faces) (+ (length faces1) (length faces2))) ; TODO still needed?
+      (unless (= (length faces) (+ (length faces1) (length faces2))) ; TODO(jmoringe) still needed?
         (setf surface-area (manifolds:surface-area all-vertices faces)))
       (let* ((hull (compute-patch-convex-hull all-vertices faces (context-vertex-index context)))
              (patch (%make-patch faces surface-area hull)))
         (cond ((valid-patch-p patch context)
                (setf (patch-compactness patch) (compute-compactness all-vertices patch))
                patch)
-              (t
-               nil ; hull ; TODO(jmoringe): for debugging
+              (T
+               NIL ; hull ; TODO(jmoringe): for debugging
                ))))))
+
+;;; `patch-link' structure
+;;;
+;;; A patch link references two `patch' instances that could be merged
+;;; based on the mesh geometry alone. If the resulting merged patch is
+;;; also valid according to the mergability criteria, that path is
+;;; stored in the patch link. Finally, a patch link contains a merge
+;;; cost value that is "infinite" when the merged patch is
+;;; invalid. The overall algorithm performs merge operations among
+;;; merge candidate path links in the order from "cheaper" candidates
+;;; to "more expensive" candidates.
 
 (defstruct (patch-link
             (:constructor %make-patch-link (a b &optional merge-cost merge-result))
@@ -239,7 +251,7 @@
                                                    )
                                                  (patch-links patch2))))
                             (setf (patch-links patch2)
-                                  (make-array (length temp) :initial-contents temp :adjustable t :fill-pointer t)))
+                                  (make-array (length temp) :initial-contents temp :adjustable T :fill-pointer T)))
                           (unless (find-link-involving new-patch patch2)
                             (push-link new-link patch2))
                           #+no (let ((j (position link (patch-links patch2))))
@@ -248,12 +260,20 @@
       (link (patch-link-b link) (patch-link-a link))
       new-patch)))
 
-(defun patch-debug-name (patch &key (format "~{[~D ~D ~D]~^ ~}~@[ …~]"))
+(defun patch-debug-name (patch &key (format "~{[~d ~d ~d]~^ ~}~@[ …~]"))
   (let* ((faces (patch-faces patch))
          (count (length faces)))
-    (format nil format
+    (format NIL format
             (coerce (subseq faces 0 (min 9 count)) 'list)
             (> count 9))))
+
+;;; Patch link merge queue
+
+(defun merge-priority (link)
+  (let ((cost (patch-link-merge-cost link)))
+    (if (= cost most-positive-double-float)
+        (ash 1 31)
+        (the (unsigned-byte 32) (floor cost 1/10000000)))))
 
 (defvar *winner*)  ; the link that was selecting for merging in the current step; for visualization
 (defun next-link (queue links)
@@ -286,20 +306,17 @@
          (patch-link-b link))
         ((eq this-patch (patch-link-b link))
          (patch-link-a link))
-        (t
+        (T
          (error "corrupt link"))))
 
+(declaim (inline verify-input))
 (defun verify-input (vertices indices)
+  (check-type vertices manifolds:vertex-array)
+  (check-type indices manifolds:face-array)
   (unless (zerop (mod (length indices) 3))
     (error "Total number of vertex indices in faces array is not a multiple of 3. Are all faces triangles?")))
 
-(defun merge-priority (link)
-  (let ((cost (patch-link-merge-cost link)))
-    (if (= cost most-positive-double-float)
-        (ash 1 31)
-        (the (unsigned-byte 32) (floor cost 1/10000000)))))
-
-(defun decompose (vertices indices &key) ; TODO indices -> faces
+(defun decompose (vertices indices &key) ; TODO(jmoringe) indices -> faces
   (verify-input vertices indices)
   ;; FIXME: This is all really dumb and uses really bad data structures
   ;;        Could definitely be optimised a lot by someone smarter
@@ -309,7 +326,7 @@
 
          (merge-queue (damn-fast-priority-queue:make-queue))
 
-         (*winner* nil))
+         (*winner* NIL))
     ;; 1. Destructure the mesh into one patch per face
     (let ((patchlist (make-array (truncate (length indices) 3)))
           (i 0))
@@ -320,22 +337,22 @@
           (setf (aref patchlist i) patch)
           (incf i)))
       ;; 2. Find neighbouring patches and create the links
-      (let ((*debug-visualizations* nil))
+      (let ((*debug-visualizations* NIL))
         (let ((adjacents (manifolds:face-adjacency-list indices)))
           (dotimes (face (length adjacents))
             (loop for other in (aref adjacents face)
                   for link = (link-patches context
                                            (aref patchlist face) (aref patchlist other))
                   when link
-                  do (setf (gethash link links) T)
-                     (damn-fast-priority-queue:enqueue merge-queue link (merge-priority link)))))))
+                    do (setf (gethash link links) T)
+                       (damn-fast-priority-queue:enqueue merge-queue link (merge-priority link)))))))
     ;; (visualize-step patches 0)
     ;; 3. Greedily merge patches according to merge cost
     (let ((i 1))
       (unwind-protect
            (loop for link = (progn
                               (when (zerop (mod i 100))
-                                (format *trace-output* "--------Step ~:D | ~:D patch~:P ~:D link~:P~%"
+                                (format *trace-output* "--------Step ~:d | ~:d patch~:p ~:d link~:p~%"
                                         i (hash-table-count patches) (hash-table-count links)))
                               (next-link merge-queue links))
                  while link   ; TODO for after while is not conforming
@@ -345,15 +362,15 @@
                                (merge-patches vertices indices context link))
 
 
-                 :do (when (debug-visualizations-p i)
+                 do (when (debug-visualizations-p i)
                        ;; (valid-patch-p (patch-link-merge-result link) vertices indices)
                        ;; (visualize-step patches i :highlight patch)
                        )
                      #+no (when (= i 10)
-                            (loop :for link :in (alexandria:hash-table-keys links)
-                                  :for j :from 0
-                                  :unless (typep (patch-link-merge-result link) 'patch)
-                                  :do (visualize-problem link i j)))
+                            (loop for link in (alexandria:hash-table-keys links)
+                                  for j from 0
+                                  unless (typep (patch-link-merge-result link) 'patch)
+                                  do (visualize-problem link i j)))
 
                  do ;; 1. Remove old patches and links
                     (assert (not (eq patch1 patch2)))
@@ -368,7 +385,7 @@
                                    )))
                       (remove-other-links patch1)
                       (remove-other-links patch2))
-                    (d "  after removing ~:D patch~:P ~D link~:P~%"
+                    (d "  after removing ~:d patch~:p ~d link~:p~%"
                        (hash-table-count patches) (hash-table-count links))
                     ;; 2. Merge the patches
                     (let (#+no (patch (let ((*debug-visualizations* (debug-visualizations-p i)))
@@ -379,37 +396,37 @@
                       (loop for link across (patch-links patch)
                             do (setf (gethash link links) T)
                                (damn-fast-priority-queue:enqueue merge-queue link (merge-priority link))))
-                 :do                    ; consistency check
+                 do                    ; consistency check
                     #+no (let ((linked-patches (make-hash-table :test #'eq))
                                (seen (make-hash-table :test #'eq)))
                            ;; validate `links' vs patch-links for all patches
-                           (loop :with worklist = (alexandria:hash-table-keys links)
-                                 :for link = (pop worklist)
-                                 :while link
-                                 :do (unless (gethash link seen)
-                                       (setf (gethash link seen) t)
-                                       (setf (gethash (patch-link-a link) linked-patches) t
-                                             (gethash (patch-link-b link) linked-patches) t)
-                                       (setf worklist (nconc worklist
-                                                             (coerce (patch-links (patch-link-a link)) 'list)
-                                                             (coerce (patch-links (patch-link-b link)) 'list)))))
+                           (loop with worklist = (alexandria:hash-table-keys links)
+                                 for link = (pop worklist)
+                                 while link
+                                 do (unless (gethash link seen)
+                                      (setf (gethash link seen) T)
+                                      (setf (gethash (patch-link-a link) linked-patches) T
+                                            (gethash (patch-link-b link) linked-patches) T)
+                                      (setf worklist (nconc worklist
+                                                            (coerce (patch-links (patch-link-a link)) 'list)
+                                                            (coerce (patch-links (patch-link-b link)) 'list)))))
                            (unless (alexandria:set-equal (alexandria:hash-table-keys patches)
                                                          (alexandria:hash-table-keys linked-patches))
-                             (format *error-output* "~D patches ~D linked patches~%"
+                             (format *error-output* "~d patches ~d linked patches~%"
                                      (hash-table-count patches)
                                      (hash-table-count linked-patches)))
                            (unless (= (hash-table-count patches) 1)
                              (assert (alexandria:set-equal (alexandria:hash-table-keys patches)
                                                            (alexandria:hash-table-keys linked-patches)))))
                     (incf i)
-                 :finally (format *trace-output* "--------Result | ~:D patch~:P ~D link~:P~%"
+                 finally (format *trace-output* "--------Result | ~:d patch~:p ~d link~:p~%"
                                   (hash-table-count patches) (hash-table-count links)))
-        ;; (visualize-step (alexandria:hash-table-keys patches) i :final t)
+        ;; (visualize-step (alexandria:hash-table-keys patches) i :final T)
         ))
     ;; 4. Return the patches' convex hulls
     (let ((hulls (make-array (hash-table-count patches))))
       (loop for patch being the hash-keys of patches
             for i from 0
             do (setf (aref hulls i) (patch-hull patch)))
-      (remove nil hulls)                ; TODO temp hack
+      (remove NIL hulls)                ; TODO(jmoringe): temp hack
       )))

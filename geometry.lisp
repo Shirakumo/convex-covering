@@ -2,7 +2,7 @@
 
 ;;; Bounding box
 
-(declaim (ftype (function (dvec3 dvec3) (values vec3 vec3 &optional nil))
+(declaim (ftype (function (dvec3 dvec3) (values vec3 vec3 &optional NIL))
                 center-and-size-from-min-and-max)
          ;; (inline center-and-size-from-min-and-max)
          )
@@ -13,7 +13,7 @@
     (values (vec (vx center) (vy center) (vz center))
             (vec (vx size/2) (vy size/2) (vz size/2)))))
 
-(declaim (ftype (function (dvec3 dvec3 dvec3) (values vec3 vec3 &optional nil))
+(declaim (ftype (function (dvec3 dvec3 dvec3) (values vec3 vec3 &optional NIL))
                 triangle-bounding-box)
          ;; (inline triangle-bounding-box)
          )
@@ -23,7 +23,7 @@
     (center-and-size-from-min-and-max min max)))
 
 (declaim (ftype (function (manifolds:vertex-array manifolds:face-array manifolds:u32)
-                          (values vec3 vec3 &optional nil))
+                          (values vec3 vec3 &optional NIL))
                 face-bounding-box)
          ;; (inline face-bounding-box)
          )
@@ -54,17 +54,17 @@
            (<= i2-min i1-min i2-max))
   (let ((threshold (coerce threshold 'double-float)))
     (cond ((<= (abs (- (min i1-min i2-min) (max i1-max i2-max))) threshold)
-           (values t :identical))
+           (values T :identical))
           ((<= i1-min i2-min i1-max i2-max) ; case 2
            (d "~4@TOverlap ~A~%"
               (abs (- i2-min i1-max)))
-           (values t (if (< (abs (- i2-min i1-max)) threshold) :touching :penetrating)))
+           (values T (if (< (abs (- i2-min i1-max)) threshold) :touching :penetrating)))
           ((<= i1-min i2-min i2-max i1-max) ; case 3
            (d "~4@TI₂ ⊂ I₁ (case 3) Overlaps ~A ~A~%"
               (abs (- i1-min i2-min))   ; cases 3 4
               (abs (- i1-max i2-max))   ; cases 3 4
               )
-           (values t :penetrating
+           (values T :penetrating
                    #+no (if (< (min (abs (- i1-min i2-min)) (abs (- i1-max i2-max))) threshold)
                             :touching
                             :penetrating)))
@@ -73,12 +73,12 @@
               (abs (- i1-min i2-min))   ; cases 3 4
               (abs (- i1-max i2-max))   ; cases 3 4
               )
-           (values t :penetrating
+           (values T :penetrating
                    #+no (if (< (min (abs (- i1-min i2-min)) (abs (- i1-max i2-max))) threshold) :touching :penetrating)))
           ((<= i2-min i1-min i2-max i1-max) ; case 5
            (d "~4@TOverlap ~A~%"
               (abs (- i1-min i2-max)))
-           (values t (if (< (abs (- i1-min i2-max)) threshold) :touching :penetrating)))
+           (values T (if (< (abs (- i1-min i2-max)) threshold) :touching :penetrating)))
           #+no ((not (or (> (- i2-min i1-max) threshold)
                          (> (- i1-min i2-max) threshold)))
                 (d "~4@TOverlaps ~A ~A ~A ~A~%"
@@ -86,9 +86,9 @@
                    (abs (- i1-min i2-min))  ; cases 3 4
                    (abs (- i1-max i2-max))  ; cases 3 4
                    (abs (- i1-min i2-max))) ; case 5
-                t)
-          (t                            ; no intersection
-           nil))))
+                T)
+          (T                            ; no intersection
+           NIL))))
 
 (defun triangles-intersect-p (u1 u2 u3 v1 v2 v3 &key (threshold 1d-6))
   (declare (type dvec3 u1 u2 u3 v1 v2 v3))
@@ -126,10 +126,10 @@
                normal-separating-p normal-class)
             (cond (normal-separating-p
                    (d "normal separating~%")
-                   nil)
+                   NIL)
                   ((eq normal-class :identical)
                    (d "Edge normals (coplanar case)~%")
-                   (block nil
+                   (block NIL
                      (let ((contact :penetrating))
                        (flet ((test-axis (e1 e2)
                                 (declare (type dvec3 e1 e2))
@@ -137,8 +137,8 @@
                                   (multiple-value-bind (separatingp class)
                                       (separating-axis-p edge-normal 0)
                                     (cond (separatingp
-                                           (return (values nil :coplanar)))
-                                          (t
+                                           (return (values NIL :coplanar)))
+                                          (T
                                            (when (and (eq contact :penetrating)
                                                       (eq class :touching))
                                              (setf contact class))))))))
@@ -148,7 +148,7 @@
                          (test-axis v1 v2)
                          (test-axis v2 v3)
                          (test-axis v3 v1)
-                         (values t :coplanar contact))))
+                         (values T :coplanar contact))))
 
                    #+old(let ((n12 (vunit (vc normal-u (v- u2 u1))))
                               (n23 (vunit (vc normal-u (v- u3 u2))))
@@ -157,10 +157,10 @@
                           (cond ((and (not (separating-axis-p n12 0))
                                       (not (separating-axis-p n23 0))
                                       (not (separating-axis-p n31 0)))
-                                 (values t :coplanar))
-                                (t
-                                 (values nil :coplanar)))))
-                  (t
+                                 (values T :coplanar))
+                                (T
+                                 (values NIL :coplanar)))))
+                  (T
                    (d "General edge pairs~%")
                    (let ((contact normal-class))
                      (if (flet ((test-axis (u1 u2 v1 v2)
@@ -185,9 +185,9 @@
                                      :do (loop :for (b1 b2) :on (list v1 v2 v3 v1)
                                                :while b2
                                                :when (test-axis a1 a2 b1 b2)
-                                               :do (return-from outer t)))))
-                         nil
-                         (values t nil contact)))))))
+                                               :do (return-from outer T)))))
+                         NIL
+                         (values T NIL contact)))))))
       (d "=> ~A~:*~:[~; ~A ~A~]~%"
          result
          (or constellation :general)
@@ -212,7 +212,7 @@
              (d "~2@TAxis~@[ ~A~] ~A~&~
                  ~4@T=> {~5,2F ~5,2F ~5,2F} {~5,2F ~5,2F}~&~
                  ~4@T=> [~5,2F, ~5,2F] [~5,2F, ~5,2F]~%"
-                nil axis
+                NIL axis
                 du1 du2 du3 dl1 dl2
                 iu-min iu-max iv-min iv-max)
              (multiple-value-bind (intersectp class)
@@ -230,10 +230,10 @@
                normal-separating-p normal-class)
             (cond (normal-separating-p
                    (d "normal separating~%")
-                   nil)
+                   NIL)
                   ((eq normal-class :identical)
                    (d "Edge normals (coplanar case)~%")
-                   (block nil
+                   (block NIL
                      (let ((contact :penetrating))
                        (flet ((test-axis (e1 e2)
                                 (declare (type dvec3 e1 e2))
@@ -241,8 +241,8 @@
                                   (multiple-value-bind (separatingp class)
                                       (separating-axis-p edge-normal)
                                     (cond (separatingp
-                                           (return (values nil :coplanar)))
-                                          (t
+                                           (return (values NIL :coplanar)))
+                                          (T
                                            (when (and (eq contact :penetrating)
                                                       (eq class :touching))
                                              (setf contact class))))))))
@@ -250,8 +250,8 @@
                          (test-axis u2 u3)
                          (test-axis u3 u1)
                          (test-axis l1 l2)
-                         (values t :coplanar contact)))))
-                  (t
+                         (values T :coplanar contact)))))
+                  (T
                    (d "General edge pairs~%")
                    (let ((contact normal-class))
                      (if (flet ((test-axis (u1 u2 v1 v2)
@@ -274,9 +274,9 @@
                                      :for (a1 a2) :on (list u1 u2 u3 u1)
                                      :while a2
                                      :do (when (test-axis a1 a2 l1 l2)
-                                           (return-from outer t)))))
-                         nil
-                         (values t nil contact)))))))
+                                           (return-from outer T)))))
+                         NIL
+                         (values T NIL contact)))))))
       (d "=> ~A~:*~:[~; ~A ~A~]~%"
          result
          (or constellation :general)

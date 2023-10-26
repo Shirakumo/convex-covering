@@ -110,7 +110,7 @@
 
 (defstruct (context
             (:constructor make-context (vertices faces
-                                        &aux (boundary-edges      (manifolds::boundary-list faces))
+                                        &aux (boundary-edges      (manifolds:boundary-list faces))
                                              (vertex-index        (index-vertices vertices))
                                              (face-index          (index-faces vertices faces))
                                              (boundary-edge-index (index-boundary-edges
@@ -118,7 +118,7 @@
             (:copier nil)
             (:predicate nil))
   ;; Mesh
-  (vertices            (error "required") :type (manifolds:vertex-array double-float) :read-only T)
+  (vertices            (error "required") :type (manifolds:vertex-array manifolds:f64) :read-only T)
   (faces               (error "required") :type manifolds:face-array :read-only T)
   (boundary-edges      (error "required") :read-only T) ; TODO types
   ;; Index structures
