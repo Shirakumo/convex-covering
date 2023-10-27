@@ -70,15 +70,15 @@
   (check-type hull hull)
   (let* ((vertices (hull-vertices hull))
          (faces (hull-facets hull))
-         (min (dvec (aref vertices 0) (aref vertices 1) (aref vertices 2)))
-         (max min))
+         (min #1=(dvec (aref vertices 0) (aref vertices 1) (aref vertices 2)))
+         (max #1#))
     (declare (type dvec3 min max))
     (manifolds:do-faces (a b c faces)
       (let ((v1 (manifolds:v vertices a))
             (v2 (manifolds:v vertices b))
             (v3 (manifolds:v vertices c)))
-        (setf min (vmin min v1 v2 v3) ; TODO(jmoringe): can use destructive destructive (but make max separate, then)
-              max (vmax max v1 v2 v3))))
+        (nvmin min v1 v2 v3)
+        (nvmax max v1 v2 v3)))
     (center-and-size-from-min-and-max min max)))
 
 (declaim (inline bounding-box))
@@ -213,10 +213,10 @@
             (:constructor %make-patch-link (a b &optional merge-cost merge-result))
             (:copier NIL)
             (:predicate NIL))
-  (a NIL :type patch)
-  (b NIL :type patch)
-  (merge-cost most-positive-double-float :type double-float)
-  (merge-result NIL :type (or null patch)))
+  (a NIL :type patch :read-only T)
+  (b NIL :type patch :read-only T)
+  (merge-cost most-positive-double-float :type double-float :read-only T)
+  (merge-result NIL :type (or null patch) :read-only T))
 
 (defun make-patch-link (context patch1 patch2)
   (assert (not (eq patch1 patch2)))
@@ -238,7 +238,7 @@
   (or (eq (patch-link-a link) patch)
       (eq (patch-link-b link) patch)))
 
-(defun merge-patches (all-vertices all-faces context link)
+(defun merge-patches (context link)
   (let ((new-patch (patch-link-merge-result link)))
     ;; Now that we actually merge this in, compute new links and update the existing neighbour's links.
     (flet ((link (cur other)
@@ -413,7 +413,7 @@
                  for patch1 = (patch-link-a link)
                  for patch2 = (patch-link-b link)
                  for patch = (let ((*debug-visualizations* (debug-visualizations-p i)))
-                               (merge-patches vertices indices context link))
+                               (merge-patches context link))
 
 
                  do (when (debug-visualizations-p i)
