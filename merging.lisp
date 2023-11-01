@@ -167,9 +167,20 @@
        (declare (ignore intersectp))
        (and (eq constellation :coplanar) (eq contact :penetrating))))))
 
+(defun hull-flat-p (hull &key (threshold .0001))
+  (let ((vertices (hull-vertices hull)))
+    (or (<= (length vertices) (* 3 3))
+        (let* ((a      (manifolds:v vertices 0))
+               (b      (manifolds:v vertices 1))
+               (c      (manifolds:v vertices 2))
+               (normal (vunit (vc (v- b a) (v- c a)))))
+          (loop for i from 3 below (/ (length vertices) 3)
+                for v = (manifolds:v vertices i)
+                always (<= (abs (v. normal (v- v a))) threshold))))))
+
 (defun normals-matching-p (patch hull context)
   (declare (type hull hull))
-  (or (<= (length (hull-vertices hull)) (* 3 4)) ; HACK to work around degenerate 2D case
+  (or (hull-flat-p hull) ; (<= (length (hull-vertices hull)) (* 3 4)) ; HACK to work around degenerate 2D case
       (let ((all-vertices (context-vertices context))
             (all-faces (context-faces context))
             (hull-vertices (hull-vertices hull))
