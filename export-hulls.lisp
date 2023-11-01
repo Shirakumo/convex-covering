@@ -8,7 +8,9 @@
                  for i :from 0
                  for color = (if colors
                                  (funcall colors i)
-                                 (color<-faces (hull-global-faces hull)))
+                                 (color<-faces (etypecase hull
+                                                 (hull (hull-global-faces hull))
+                                                 (convex-hull (faces hull)))))
                  for name = (format NIL "patch~a" i)
                  for mtl = (apply #'make-instance 'org.shirakumo.fraf.wavefront:material
                                   :name name
@@ -17,8 +19,12 @@
                                     (list :transmission-factor (- 1 alpha))))
                  for mesh = (make-instance 'org.shirakumo.fraf.wavefront:mesh
                                            :name name
-                                           :vertex-data (vertices hull)
-                                           :index-data (faces hull)
+                                           :vertex-data (etypecase hull
+                                                          (hull (hull-vertices hull))
+                                                          (convex-hull (vertices hull)))
+                                           :index-data (etypecase hull
+                                                         (hull (hull-facets hull))
+                                                         (convex-hull (faces hull)))
                                            :attributes '(:position)
                                            :material mtl)
                  collect mesh)

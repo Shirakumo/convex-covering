@@ -3,7 +3,7 @@
 ;;; Merge validity
 
 (defun valid-patch-p (patch context)
-  (when *debug-visualizations*
+  (when nil ; *debug-visualizations*
     (handler-case
         (progn
           #+no (let ((hull (patch-hull patch)))
@@ -188,6 +188,19 @@
             (c (manifolds:v all-vertices ic))
                                         ; (face-normal (vunit (vc (v- b a) (v- c a))))
             )
+           (when *debug-visualizations*
+                                        ; (debug-line* a b :face-edge hull)
+                                        ; (debug-line* b c :face-edge hull)
+                                        ; (debug-line* c a :face-edge hull)
+             (push (cons :line (cons a b)) (hull-annotations hull))
+             (push (cons :line (cons b c)) (hull-annotations hull))
+             (push (cons :line (cons c a)) (hull-annotations hull))
+             (let ((face-centroid (v/ (v+ a b c) 3)))
+               (push (cons :line (cons face-centroid (v+ face-centroid (v* face-normal .3))))
+                     (hull-annotations hull))
+                                        ; (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)
+               ))
+
            (when (not (loop for i below (/ (length hull-faces) 3)
                             for (facet-centroid . facet-normal) in (facet-normals hull)
                             always (if (and (< (abs (- -1 (v. face-normal (the dvec3 facet-normal)))) .0001)
@@ -199,20 +212,24 @@
                                             ia ib ic i)
                                          (let ()
                                            (when *debug-visualizations*
-                                             (debug-line* a b :face-edge hull)
-                                             (debug-line* b c :face-edge hull)
-                                             (debug-line* c a :face-edge hull)
+                                        ; (debug-line* a b :face-edge hull)
+                                        ; (debug-line* b c :face-edge hull)
+                                        ; (debug-line* c a :face-edge hull)
+                                             (push (cons :line (cons a b)) (hull-annotations hull))
+                                             (push (cons :line (cons b c)) (hull-annotations hull))
+                                             (push (cons :line (cons c a)) (hull-annotations hull))
                                              (let ((face-centroid (v/ (v+ a b c) 3)))
-                                               (push (cons face-centroid :face-centroid) (hull-annotations hull))
-                                               (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)))
+                                               (push (cons :point face-centroid) (hull-annotations hull))
+                                        ; (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)
+                                               ))
                                            (d "~2@tface normal ~a~&~2@tfacet normal ~a~&~2@t=> ~a~%"
                                               face-normal
                                               facet-normal
                                               (v. face-normal facet-normal))
                                            (cond (T ; (< (abs (- -1 (v. face-normal facet-normal))) .0001)
                                                   (when *debug-visualizations*
-                                                    (debug-line facet-centroid face-normal :bad-normal hull)
-                                                    (debug-line facet-centroid facet-normal :bad-normal hull))
+                                                    (push (cons :line (cons facet-centroid face-normal)) (hull-annotations hull))
+                                                    (push (cons :line (cons facet-centroid facet-normal)) (hull-annotations hull)))
                                                   NIL)
                                                  (T
                                                   T))))

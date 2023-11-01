@@ -109,7 +109,9 @@
   (hull NIL :type (or null hull))
   (links (make-array 0 :adjustable T :fill-pointer T) :type vector)
   (surface-area (error "required") :type double-float :read-only T)
-  (compactness 0.0d0 :type double-float))
+  (compactness 0.0d0 :type double-float)
+  ;; Debug information
+  (link))
 
 (defun make-patch (all-vertices a b c)
   (let* ((faces        (make-array 3 :element-type     'manifolds:u32
@@ -222,7 +224,9 @@
   (assert (not (eq patch1 patch2)))
   (let ((result (make-merged-patch context patch1 patch2)))
     (if result ; (typep result 'patch)
-        (%make-patch-link patch1 patch2 (/ (patch-compactness result)) result)
+        (let ((link (%make-patch-link patch1 patch2 (/ (patch-compactness result)) result)))
+          (setf (patch-link result) link)
+          link)
         (%make-patch-link patch1 patch2 most-positive-double-float result))))
 
 (defun link-patches (context a b) ; called in preparation phase for adjacent faces
@@ -325,7 +329,8 @@
             (:copier NIL)
             (:predicate NIL))
   (vertices (error "required") :type manifolds:vertex-array :read-only T)
-  (faces    (error "required") :type manifolds:face-array :read-only T))
+  (faces    (error "required") :type manifolds:face-array :read-only T)
+  (debug-info))
 
 (defun make-convex-hull-from-hull (vertex-component-type hull)
   (let* ((hull-vertices (hull-vertices hull))
@@ -473,7 +478,7 @@
                              (assert (alexandria:set-equal (alexandria:hash-table-keys patches)
                                                            (alexandria:hash-table-keys linked-patches)))))
                     (incf i)
-                 finally (format *trace-output* "--------Result | ~:d patch~:p ~d link~:p~%"
+                 finally (format *trace-output* "--------Result | ~:d patch~:p ~:d link~:p~%"
                                   (hash-table-count patches) (hash-table-count links)))
         ;; (visualize-step (alexandria:hash-table-keys patches) i :final T)
         ))
@@ -483,5 +488,7 @@
           for patch being the hash-keys of patches
           for hull = (patch-hull patch)
           do (setf (aref hulls i) (when hull ; TODO(jmoringe): can we avoid storing those patches in the first place?
-                                    (make-convex-hull-from-hull vertex-component-type hull)))
-          finally (return (remove nil hulls)))))
+                                    (let ((result (make-convex-hull-from-hull vertex-component-type hull)))
+                                      (setf (debug-info result) (list :hull hull :patch patch))
+                                      result)))
+          finally (return (values (remove nil hulls) context)))))
