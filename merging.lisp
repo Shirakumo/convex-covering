@@ -3,33 +3,11 @@
 ;;; Merge validity
 
 (defun valid-patch-p (patch context)
-  (when nil ; *debug-visualizations*
-    (handler-case
-        (progn
-          #+no (let ((hull (patch-hull patch)))
-            (loop :for face-index :below (/ (length (patch-faces patch)) 3)
-                  :do (debug-face* all-vertices (patch-faces patch) face-index :patch-edge hull :sample-count 11)))
-
-          (let ((hull (patch-hull patch)))
-            (loop with hull-vertices = (hull-vertices hull)
-                  with hull-faces = (hull-facets hull)
-                  for face-index below (/ (length hull-faces) 3)
-                  for face-vertex-index = (aref hull-faces (* 3 face-index))
-                  for face-vertex = (manifolds:v hull-vertices face-vertex-index)
-                  for face-normal = (vunit (manifolds:face-normal hull-vertices hull-faces face-index))
-                  for face-centroid = (manifolds:centroid hull-vertices (subseq hull-faces (* 3 face-index) (+ (* 3 face-index) 3)))
-                  do (debug-face* hull-vertices hull-faces face-index :facet-edge hull :sample-count 12)
-                  do (push (cons face-centroid :facet-centroid) (hull-annotations hull))
-                     (debug-line face-centroid (v* face-normal .2) :facet-normal hull :sample-count 11))))
-      (floating-point-invalid-operation ()
-        )))
-
   (let ((valid
           (handler-case
               (let ((hull (patch-hull patch)))
                 (and ; (not (find-vertex-in-hull hull context))
                      (not (find-edge-in-hull hull context))
-                     #+TODO (normals-matching-p/overlap-per-facet patch hull context)
                      (normals-matching-p patch hull context)
                      (not (find-boundary-constraint-bar hull context))
                      (not (find-negative-side-touching-triangle hull))))
@@ -71,15 +49,10 @@
       (setf (hull-problem hull) :vertex))
     result))
 
-(defvar *overlap-counts* (make-array 0 :adjustable T :fill-pointer 0))
-
 (defun find-edge-in-hull (hull context)
   (declare (type hull hull))
   (when (let ((all-vertices (context-vertices context))
-              (all-faces (context-faces context))
-                                        ; (hull-faces (facets hull))
-                                        ; (hull-faces/global (global-faces hull))
-              (overlapping (make-array 0 :adjustable T :fill-pointer 0)))
+              (all-faces (context-faces context)))
           (unwind-protect
                (space:do-overlapping (face-info (context-face-index context) hull NIL)
                  ;; manifolds:do-faces (a b c all-faces NIL) ; TODO tests some edges multiple times
@@ -129,24 +102,9 @@
                              (or (edge-in-hull-p v1 v2)
                                  (edge-in-hull-p v2 v3)
                                  (edge-in-hull-p v3 v1))))
-                     (return T))))
-            ; (vector-push-extend (cons hull overlapping) *overlap-counts*)
-            ))
+                     (return T))))))
     (setf (hull-problem hull) :edge)
     T))
-
-#+unused (defun face-matches-facet-p (h1 h2 h3 v1 v2 v3
-                             &key (eps .000001))
-  (flet ((d (p1 p2)
-           (v2norm (v- p1 p2))))
-    (flet ((matching-facet-vertex (p)
-             (loop :for h :in (list h1 h2 h3)
-                   :when (< (d p h) eps)
-                   :return h)))
-      (let ((m1 (matching-facet-vertex v1))
-            (m2 (matching-facet-vertex v2))
-            (m3 (matching-facet-vertex v3)))
-        (and m1 m2 m3)))))
 
 (defun face-overlaps-or-matches-facet-p (hull-vertices hull-faces facet-index v1 v2 v3
                                          &key (threshold 0) hull)
@@ -167,20 +125,9 @@
        (declare (ignore intersectp))
        (and (eq constellation :coplanar) (eq contact :penetrating))))))
 
-(defun hull-flat-p (hull &key (threshold .0001))
-  (let ((vertices (hull-vertices hull)))
-    (or (<= (length vertices) (* 3 3))
-        (let* ((a      (manifolds:v vertices 0))
-               (b      (manifolds:v vertices 1))
-               (c      (manifolds:v vertices 2))
-               (normal (vunit (vc (v- b a) (v- c a)))))
-          (loop for i from 3 below (/ (length vertices) 3)
-                for v = (manifolds:v vertices i)
-                always (<= (abs (v. normal (v- v a))) threshold))))))
-
 (defun normals-matching-p (patch hull context)
   (declare (type hull hull))
-  (or (hull-flat-p hull) ; (<= (length (hull-vertices hull)) (* 3 4)) ; HACK to work around degenerate 2D case
+  (or (hull-flat-p hull)
       (let ((all-vertices (context-vertices context))
             (all-faces (context-faces context))
             (hull-vertices (hull-vertices hull))

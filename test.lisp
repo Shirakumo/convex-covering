@@ -1,6 +1,5 @@
 (defpackage #:org.shirakumo.fraf.convex-covering.test
-  (:use #:cl #:parachute ; #:org.shirakumo.flare.vector
-        )
+  (:use #:cl #:parachute)
   (:local-nicknames
    (#:m #:org.shirakumo.fraf.math)
    (#:convex-covering #:org.shirakumo.fraf.convex-covering)
