@@ -1,6 +1,6 @@
 (in-package #:org.shirakumo.fraf.convex-covering)
 
-;;; Vertex index
+;;; Vertex position index
 ;;;
 ;;; Lookup index in global vertex array given the vertex coordinates.
 
@@ -15,12 +15,46 @@
   (check-type vertex dvec3)
   (setf (gethash vertex index) new-value))
 
-(defun index-vertices (vertices)
+(defun index-vertex-positions (vertices)
   (check-type vertices manifolds:vertex-array)
   (loop with index = (make-vertex-index)
         for i below (/ (length vertices) 3)
         for vertex = (manifolds:v vertices i)
         do (setf (vertex-position vertex index) i)
+        finally (return index)))
+
+;;; Spatial indices
+
+(defun make-spatial-index ()
+  (ecase :kd-tree
+    (:grid    (org.shirakumo.fraf.trial.space.grid3:make-grid .3 :bsize (vec3 2 2 2)))
+    (:kd-tree (org.shirakumo.fraf.trial.space.kd-tree:make-kd-tree :dimensions 3))))
+
+;;; Vertex index
+;;;
+;;; This allows efficiently finding vertices that are contained in a
+;;; given axis-aligned box.
+
+(defstruct (vertex-info
+            (:constructor make-vertex-info (index location))
+            (:predicate NIL)
+            (:copier NIL))
+  (index    (error "required") :type manifolds:u32 :read-only T)
+  (location (error "required") :type vec3          :read-only T))
+
+(defmethod space:location ((object vertex-info))
+  (vertex-info-location object))
+
+(defmethod space:bsize ((object vertex-info))
+  (load-time-value (vec 0 0 0)))
+
+(defun index-vertices (vertices)
+  (check-type vertices manifolds:vertex-array)
+  (loop with index = (make-spatial-index)
+        for i below (/ (length vertices) 3)
+        for vertex = (manifolds:v vertices i)
+        for info = (make-vertex-info i (vec vertex))
+        do (space:enter info index)
         finally (return index)))
 
 ;;; Face index
@@ -29,7 +63,9 @@
 ;;; axis-aligned box.
 
 (defstruct (face-info
-            (:constructor make-face-info (index center size/2 normal)))
+            (:constructor make-face-info (index center size/2 normal))
+            (:predicate NIL)
+            (:copier NIL))
   (index  (error "required") :type manifolds:u32 :read-only T)
   (center (error "required") :type vec3          :read-only T)
   (size/2 (error "required") :type vec3          :read-only T)
@@ -42,16 +78,14 @@
   (face-info-size/2 object))
 
 (defun index-faces (vertices faces)
-  (let ((index (ecase :kd-tree
-                 (:grid    (org.shirakumo.fraf.trial.space.grid3:make-grid .3 :bsize (vec3 2 2 2)))
-                 (:kd-tree (org.shirakumo.fraf.trial.space.kd-tree:make-kd-tree :dimensions 3)))))
+  (let ((index (make-spatial-index)))
     (loop for i below (/ (length faces) 3)
           for (center size/2) = (multiple-value-list ; SBCL optimizes this away
                                  (face-bounding-box vertices faces i))
           for normal = (vunit (manifolds:face-normal vertices faces i))
           for info = (make-face-info i center size/2 normal)
           do (space:enter info index))
-    (space:reoptimize index) ; TODO use enter-all
+    (space:reoptimize index) ; TODO(jmoringe): use `space:enter-all' instead
     index))
 
 ;;; Boundary edge index
@@ -110,18 +144,20 @@
 
 (defstruct (context
             (:constructor make-context (vertices faces
-                                        &aux (boundary-edges      (manifolds:boundary-list faces))
-                                             (vertex-index        (index-vertices vertices))
-                                             (face-index          (index-faces vertices faces))
-                                             (boundary-edge-index (index-boundary-edges
-                                                                   vertices boundary-edges))))
-            (:copier nil)
-            (:predicate nil))
+                                        &aux (vertex-position-index (index-vertex-positions vertices))
+                                             (vertex-index          (index-vertices vertices))
+                                             (face-index            (index-faces vertices faces))
+                                             (boundary-edges        (manifolds:boundary-list faces))
+                                             (boundary-edge-index   (index-boundary-edges
+                                                                    vertices boundary-edges))))
+            (:predicate nil)
+            (:copier nil))
   ;; Mesh
-  (vertices            (error "required") :type (manifolds:vertex-array manifolds:f64) :read-only T)
-  (faces               (error "required") :type manifolds:face-array :read-only T)
-  (boundary-edges      (error "required") :read-only T) ; TODO types
+  (vertices              (error "required") :type (manifolds:vertex-array manifolds:f64) :read-only T)
+  (faces                 (error "required") :type manifolds:face-array :read-only T)
+  (boundary-edges        (error "required") :read-only T) ; TODO types
   ;; Index structures
-  (vertex-index        (error "required") :read-only T)
-  (face-index          (error "required") :read-only T)
-  (boundary-edge-index (error "required") :read-only T))
+  (vertex-position-index (error "required") :read-only T)
+  (vertex-index          (error "required") :read-only T)
+  (face-index            (error "required") :read-only T)
+  (boundary-edge-index   (error "required") :read-only T))

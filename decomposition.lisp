@@ -30,18 +30,18 @@
   (annotations   '() :type list)
   (problem       NIL))
 
-(defun make-hull (vertices faces vertex-index)
+(defun make-hull (vertices faces vertex-position-index)
   (let ((global-faces (make-array 0 :element-type 'manifolds:u32
                                     :adjustable T
                                     :fill-pointer 0)) ; TODO remove adjust-ability before returning?
         )
     (manifolds:do-faces (a/li b/li c/li faces)
       (let* ((a    (manifolds:v vertices a/li))
-             (a/gi (vertex-position a vertex-index))
+             (a/gi (vertex-position a vertex-position-index))
              (b    (manifolds:v vertices b/li))
-             (b/gi (vertex-position b vertex-index))
+             (b/gi (vertex-position b vertex-position-index))
              (c    (manifolds:v vertices c/li))
-             (c/gi (vertex-position c vertex-index)))
+             (c/gi (vertex-position c vertex-position-index)))
         (when (and a/gi b/gi c/gi)
           (vector-push-extend a/gi global-faces)
           (vector-push-extend b/gi global-faces)
@@ -130,7 +130,7 @@
          (surface-area (manifolds:face-area all-vertices faces 0)))
     (%make-patch faces surface-area)))
 
-(defun compute-patch-convex-hull (all-vertices faces vertex-index)
+(defun compute-patch-convex-hull (all-vertices faces vertex-position-index)
   (let* ((vertex-count (length faces))
          ;; Quickhull doesn't like duplicate vertices so we take case
          ;; of those here.
@@ -157,7 +157,7 @@
              (vector-push-extend j global-faces))
     (multiple-value-call #'make-hull
       (org.shirakumo.fraf.quickhull:convex-hull vertices)
-      vertex-index)))
+      vertex-position-index)))
 
 (defun push-link (new-link patch)
   (assert (or (eq patch (patch-link-a new-link))
@@ -202,7 +202,7 @@
     (let ((all-vertices (context-vertices context)))
       (unless (= (length faces) (+ (length faces1) (length faces2))) ; TODO(jmoringe) still needed?
         (setf surface-area (manifolds:surface-area all-vertices faces)))
-      (let* ((hull (compute-patch-convex-hull all-vertices faces (context-vertex-index context)))
+      (let* ((hull (compute-patch-convex-hull all-vertices faces (context-vertex-position-index context)))
              (patch (%make-patch faces surface-area hull)))
         (cond ((valid-patch-p patch context)
                (setf (patch-compactness patch) (compute-compactness all-vertices patch))
