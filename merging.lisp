@@ -32,22 +32,44 @@
                                         ; (not (> (v. facet-normal (v- vertex facet-centroid)) .0001))
                   (< (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid))) eps)))))
 
+
+;;; This version assumes that VERTEX is within the bounding box of
+;;; HULL and thus only checks VERTEX against all hull facets.
+(defun vertex-in-hull-p** (vertex hull &key (eps -.01))
+  (declare (type hull hull)
+           (type vec3 vertex))
+  (let ((vertex (dvec vertex)))
+    (loop for (facet-centroid . facet-normal) in (facet-normals hull)
+          always (< (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid))) eps))))
+
 (defun find-vertex-in-hull (hull context)
   (declare (type hull hull)
            (optimize speed (safety 1) (debug 1)))
-  (let* ((all-vertices (context-vertices context))
-         (result (loop with hull-faces = (hull-global-faces hull)
-                       for vertex-index from 0 below (/ (length all-vertices) 3)
-                       for vertex = (manifolds:v all-vertices vertex-index)
-                       when (and *debug-visualizations*
-                                 (not (find vertex-index hull-faces))
-                                 (vertex-in-hull-p vertex hull))
-                         do (push (cons vertex :bad) (hull-annotations hull))
-                      thereis (and (vertex-in-hull-p vertex hull)
-                                   (not (find vertex-index hull-faces))))))
-    (when result
-      (setf (hull-problem hull) :vertex))
-    result))
+  (let ((hull-faces (hull-global-faces hull)))
+    (space:do-overlapping (vertex (context-vertex-index context) hull nil)
+      (let ((index    (vertex-info-index vertex))
+            (position (vertex-info-location vertex)))
+        (when (and *debug-visualizations*
+                   (vertex-in-hull-p** position hull))
+          (push (cons vertex :bad) (hull-annotations hull)))
+        (when (vertex-in-hull-p** position hull)
+          ;; TODO(jmoringe): remove later; vertices that are part of
+          ;; the hull can never be properly inside the hull
+          (assert (not (find index hull-faces)))
+          (return T)))))
+  #+no (let* ((all-vertices (context-vertices context))
+              (result (loop with hull-faces = (hull-global-faces hull)
+                            for vertex-index from 0 below (/ (length all-vertices) 3)
+                            for vertex = (manifolds:v all-vertices vertex-index)
+                            when (and *debug-visualizations*
+                                      (not (find vertex-index hull-faces))
+                                      (vertex-in-hull-p vertex hull))
+                            do (push (cons vertex :bad) (hull-annotations hull))
+                            thereis (and (vertex-in-hull-p vertex hull)
+                                         (not (find vertex-index hull-faces))))))
+         (when result
+           (setf (hull-problem hull) :vertex))
+         result))
 
 (defun find-edge-in-hull (hull context)
   (declare (type hull hull))
