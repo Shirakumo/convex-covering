@@ -32,6 +32,22 @@
                                         ; (not (> (v. facet-normal (v- vertex facet-centroid)) .0001))
                   (< (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid))) eps)))))
 
+;;;
+(defun vertex-in-hull-p* (vertex hull &key (eps 1e-6))
+  (declare (type hull hull)
+           (type dvec3 vertex))
+  (destructuring-bind (center . size/2) (bounding-box hull)
+    (declare (type vec3 center size/2))
+    (let* ((abs-eps (abs eps))
+           (offset  (vec abs-eps abs-eps abs-eps)))
+      (and (v<= (v- center size/2 offset)
+                (vec3 (vx vertex) (vy vertex) (vz vertex))
+                (v+ center size/2 offset)) ; TODO avoid conversion
+           (loop for (facet-centroid . facet-normal) in (facet-normals hull)
+                 for depth = (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid)))
+                 do (when *debug-output*
+                      (format *trace-output* "Depth ~A~%" depth))
+                 always (<= depth eps))))))
 
 ;;; This version assumes that VERTEX is within the bounding box of
 ;;; HULL and thus only checks VERTEX against all hull facets.
@@ -76,6 +92,7 @@
   (when (let ((all-vertices (context-vertices context))
               (all-faces (context-faces context)))
           (unwind-protect
+               ;; TODO(jmoringe): could do overlapping queries for individual hull facets
                (space:do-overlapping (face-info (context-face-index context) hull NIL)
                  ;; manifolds:do-faces (a b c all-faces NIL) ; TODO tests some edges multiple times
                  (let* #+no ()
@@ -90,9 +107,87 @@
                                         ; (minusp (v. facet-normal (v- vertex facet-centroid)))
                                         ; (not (> (v. facet-normal (v- vertex facet-centroid)) .0001))
                                                     (< (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid))) eps))
-                                    (or (vertex-in-hull-p v1 hull)
-                                        (vertex-in-hull-p v2 hull)
-                                        (vertex-in-hull-p (v* (v+ v1 v2) .5d0) hull)))
+                                    #+no (when (member :edges *debug-visualizations*)
+                                           (push (list :point (v+ v1 (dvec .01 0 0)) :color '(1 0 0))
+                                                 (hull-annotations hull))
+                                           (push (list :point (v+ v2 (dvec .01 0 0)) :color '(1 0 0))
+                                                 (hull-annotations hull))
+                                           (push (list :point (v+ (v* (v+ v1 v2) .5d0) (dvec .01 0 0)) :color '(1 0 0))
+                                                 (hull-annotations hull)))
+                                    #+no (when (or (vertex-in-hull-p v1 hull)
+                                                   (vertex-in-hull-p v2 hull)
+                                                   (vertex-in-hull-p (v+ v1 (v* (v- v2 v1) .25)) hull)
+                                                   (vertex-in-hull-p (v+ v1 (v* (v- v2 v1) .5)) hull)
+                                                   (vertex-in-hull-p (v+ v1 (v* (v- v2 v1) .75)) hull))
+                                           (when (member :edges *debug-visualizations*)
+                                             (push (list :line v1 v2 :color '(1 0 0))
+                                                   (hull-annotations hull)))
+                                           t))
+                                  (manifolds:do-faces (ai bi ci (hull-facets hull) nil)
+                                    (let ((a (manifolds:v (hull-vertices hull) ai))
+                                          (b (manifolds:v (hull-vertices hull) bi))
+                                          (c (manifolds:v (hull-vertices hull) ci)))
+                                      (multiple-value-bind (result constellation contact)
+                                          (line-intersects-triangle-p a b c v1 v2 :threshold 1d-4)
+                                        (when (and result
+                                                   (case contact
+                                                     (:touching
+                                                      ;; The edge is just touching the hull facet. Could be touching
+                                                      ;; at a vertex of the hull facet or in the (2d) interior of the
+                                                      ;; hull facet. For each end point of the edge, generate a sample
+                                                      ;; point that is offset towards the center of the edge from the
+                                                      ;; end point and test whether that point is properly inside the
+                                                      ;; hull. Chose the offset large enough so handle an edge that is
+                                                      ;; almost coplanar to the hull facet (assume 1° incidence angle
+                                                      ;; as the worst case).
+                                                      (let* ((threshold -1e-2)
+                                                             (diff      (v- v2 v1))
+                                                             (delta     (v* diff (min .5 (* 1.5
+                                                                                            (/ (sin (/ pi 180)))
+                                                                                            (abs threshold)
+                                                                                            (/ (vlength diff)))))))
+                                                        (or (vertex-in-hull-p* (v+ v1 delta) hull :eps threshold)
+                                                            (vertex-in-hull-p* (v- v2 delta) hull :eps threshold))))
+                                                     (:penetrating
+                                                      ;; The edge is penetrating the hull face. If the edge and the hull
+                                                      ;; face are coplanar, this is not a problem since the two may just
+                                                      ;; be parts of different triangulations of a non-triangle mesh face.
+                                                      ;; Other forms of penetrating contact make the hull invalid.
+                                                      (not (eq constellation :coplanar))
+                                                      #+no (or
+                                                       (vertex-in-hull-p* v1 hull :eps -1e-4)
+                                                       (vertex-in-hull-p* v2 hull :eps -1e-4)
+                                                       (vertex-in-hull-p* (v* (v+ v1 v2) .5) hull :eps -1e-4)
+                                                       #+no (and (not (eq constellation :coplanar))
+                                                                      (or (not (vertex-in-hull-p* v1 hull :eps 1e-4))
+                                                                          (not (vertex-in-hull-p* v2 hull :eps 1e-4))))
+                                                       (not (vertex-in-hull-p* v1 hull :eps 1e-4))
+                                                       (not (vertex-in-hull-p* v2 hull :eps 1e-4)))))
+                                                   #+no (or
+                                                       #+no (and (eq contact :touching)
+                                                                 (or (and (multiple-value-bind (result contact)
+                                                                              (point-on-triangle-p a b c v1)
+                                                                            result ; (and result (not (eq contact :touching)))
+                                                                            )
+                                                                          (vertex-in-hull-p* v2 hull :eps -1e-2))
+                                                                     (and (multiple-value-bind (result contact)
+                                                                              (point-on-triangle-p a b c v2)
+                                                                            result ; (and result (not (eq contact) :touching))
+                                                                            )
+                                                                          (vertex-in-hull-p* v1 hull :eps -1e-2))))))
+                                          #+no (let ((*debug-output* t))
+                                            (line-intersects-triangle-p a b c v1 v2 :threshold 1d-4)
+                                            (vertex-in-hull-p* (v* (v+ v1 v2) .5) hull :eps -1e-2))
+                                          (when (member :edges *debug-visualizations*)
+                                            (push (list :triangle a b c :color '(1 .5 0))
+                                                  (hull-annotations hull))
+                                            (push (list :line v1 v2 :color '(1 0 .5))
+                                                  (hull-annotations hull)))
+                                          #+no (format *trace-output* "~A ~A ~A v1 ~A v2 ~A~%"
+                                                  result constellation contact
+                                                  (vertex-in-hull-p* v1 hull :eps -1e-2)
+                                                  (vertex-in-hull-p* v2 hull :eps -1e-2))
+                                          (return t)))))
 
                                   #+old (and (not (let ((result (loop :for i :below (length hull-faces/global) :by 3
                                                                       :thereis (and (find vi1 hull-faces/global :start i :end (+ i 3))
@@ -121,6 +216,9 @@
                            (let ((v1 (manifolds:v all-vertices a))
                                  (v2 (manifolds:v all-vertices b))
                                  (v3 (manifolds:v all-vertices c)))
+                             #+no (when (member :edges *debug-visualizations*)
+                                    (push (list :triangle v1 v2 v3 :color '(.5 .5 1))
+                                          (hull-annotations hull)))
                              (or (edge-in-hull-p v1 v2)
                                  (edge-in-hull-p v2 v3)
                                  (edge-in-hull-p v3 v1))))
@@ -168,18 +266,11 @@
             (c (manifolds:v all-vertices ic))
                                         ; (face-normal (vunit (vc (v- b a) (v- c a))))
             )
-           (when *debug-visualizations*
-                                        ; (debug-line* a b :face-edge hull)
-                                        ; (debug-line* b c :face-edge hull)
-                                        ; (debug-line* c a :face-edge hull)
-             (push (cons :line (cons a b)) (hull-annotations hull))
-             (push (cons :line (cons b c)) (hull-annotations hull))
-             (push (cons :line (cons c a)) (hull-annotations hull))
+           (when (member :normals *debug-visualizations*)
+             (push (list :triangle a b c) (hull-annotations hull))
              (let ((face-centroid (v/ (v+ a b c) 3)))
-               (push (cons :line (cons face-centroid (v+ face-centroid (v* face-normal .3))))
-                     (hull-annotations hull))
-                                        ; (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)
-               ))
+               (push (list :line face-centroid (v+ face-centroid (v* face-normal .3)))
+                     (hull-annotations hull))))
 
            (when (not (loop for i below (/ (length hull-faces) 3)
                             for (facet-centroid . facet-normal) in (facet-normals hull)
@@ -191,15 +282,14 @@
                                          (d "[~a ~a ~a] possibly intersects facet ~a~%"
                                             ia ib ic i)
                                          (let ()
-                                           (when *debug-visualizations*
+                                           (when (member :normals *debug-visualizations*)
                                         ; (debug-line* a b :face-edge hull)
                                         ; (debug-line* b c :face-edge hull)
                                         ; (debug-line* c a :face-edge hull)
-                                             (push (cons :line (cons a b)) (hull-annotations hull))
-                                             (push (cons :line (cons b c)) (hull-annotations hull))
-                                             (push (cons :line (cons c a)) (hull-annotations hull))
+                                             (push (list :triangle a b c :color '(.5 1 .5))
+                                                   (hull-annotations hull))
                                              (let ((face-centroid (v/ (v+ a b c) 3)))
-                                               (push (cons :point face-centroid) (hull-annotations hull))
+                                               (push (list :point face-centroid :color '(.5 1 .5)) (hull-annotations hull))
                                         ; (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)
                                                ))
                                            (d "~2@tface normal ~a~&~2@tfacet normal ~a~&~2@t=> ~a~%"
@@ -207,9 +297,11 @@
                                               facet-normal
                                               (v. face-normal facet-normal))
                                            (cond (T ; (< (abs (- -1 (v. face-normal facet-normal))) .0001)
-                                                  (when *debug-visualizations*
-                                                    (push (cons :line (cons facet-centroid face-normal)) (hull-annotations hull))
-                                                    (push (cons :line (cons facet-centroid facet-normal)) (hull-annotations hull)))
+                                                  (when (member :normals *debug-visualizations*)
+                                                    (push (list :line facet-centroid face-normal :color '(.8 .8 0))
+                                                          (hull-annotations hull))
+                                                    (push (list :line facet-centroid facet-normal :color '(.8 .8 0))
+                                                          (hull-annotations hull)))
                                                   NIL)
                                                  (T
                                                   T))))
