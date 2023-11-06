@@ -7,7 +7,7 @@
          ;; (inline center-and-size-from-min-and-max)
          )
 (defun center-and-size-from-min-and-max (min max)
-  (let* ((size/2 (v/ (v- max min) 2))
+  (let* ((size/2 (v* (v- max min) .5))
          (center (v+ min size/2)))
     ;; TODO avoid conversion
     (values (vec (vx center) (vy center) (vz center))
@@ -60,21 +60,25 @@
               (abs (- i2-min i1-max)))
            (values T (if (< (abs (- i2-min i1-max)) threshold) :touching :penetrating)))
           ((<= i1-min i2-min i2-max i1-max) ; case 3
-           (d "~4@TI₂ ⊂ I₁ (case 3) Overlaps ~A ~A~%"
+           (d "~4@TI₂ ⊂ I₁ (case 3) Overlaps ~A ~A | threshold ~A~%"
               (abs (- i1-min i2-min))   ; cases 3 4
               (abs (- i1-max i2-max))   ; cases 3 4
-              )
-           (values T :penetrating
-                   #+no (if (< (min (abs (- i1-min i2-min)) (abs (- i1-max i2-max))) threshold)
-                            :touching
-                            :penetrating)))
+              threshold)
+           (values T (if (and (< (abs (- i2-min i2-max)) threshold)
+                              (or (< (abs (- i1-min i2-min)) threshold)
+                                  (< (abs (- i1-max i2-min)) threshold)))
+                         :touching
+                         :penetrating)))
           ((<= i2-min i1-min i1-max i2-max) ; case 4
            (d "~4@TI₁ ⊂ I₂ (case 4) Overlaps ~A ~A~%"
               (abs (- i1-min i2-min))   ; cases 3 4
               (abs (- i1-max i2-max))   ; cases 3 4
               )
-           (values T :penetrating
-                   #+no (if (< (min (abs (- i1-min i2-min)) (abs (- i1-max i2-max))) threshold) :touching :penetrating)))
+           (values T (if (and (< (abs (- i1-min i1-max)) threshold)
+                              (or (< (abs (- i2-min i1-min)) threshold)
+                                  (< (abs (- i2-max i1-min)) threshold)))
+                         :touching
+                         :penetrating)))
           ((<= i2-min i1-min i2-max i1-max) ; case 5
            (d "~4@TOverlap ~A~%"
               (abs (- i1-min i2-max)))
@@ -198,7 +202,7 @@
 (defun line-intersects-triangle-p (u1 u2 u3 l1 l2 &key (threshold 1d-6))
   (declare (type dvec3 u1 u2 u3 l1 l2))
   (d "U~2@T~A~%~2@T~A~%~2@T~A~%L~2@T~A~%~2@T~A~%" u1 u2 u3 l1 l2)
-  (flet ((separating-axis-p (axis)
+  (flet ((separating-axis-p (axis threshold)
            (declare (type dvec3 axis))
            (let* ((du1    (v. axis u1))
                   (du2    (v. axis u2))
@@ -225,7 +229,7 @@
         (let ((normal-u (vunit (vc (v- u2 u1) (v- u3 u1)))))
           (d "Normal~%")
           (multiple-value-bind (normal-separating-p normal-class)
-              (separating-axis-p normal-u)
+              (separating-axis-p normal-u 1d-3) ; TODO
             (d "~2@T=> ~:[not separating~;separating~]~@[ | ~A~]~%"
                normal-separating-p normal-class)
             (cond (normal-separating-p
@@ -239,27 +243,32 @@
                                 (declare (type dvec3 e1 e2))
                                 (let ((edge-normal (vunit (vc normal-u (v- e2 e1)))))
                                   (multiple-value-bind (separatingp class)
-                                      (separating-axis-p edge-normal)
+                                      (separating-axis-p edge-normal threshold)
                                     (cond (separatingp
                                            (return (values NIL :coplanar)))
-                                          (T
-                                           (when (and (eq contact :penetrating)
-                                                      (eq class :touching))
-                                             (setf contact class))))))))
+                                          ((and (eq class :touching)
+                                                (eq contact :penetrating))
+                                           (setf contact class)))))))
                          (test-axis u1 u2)
                          (test-axis u2 u3)
                          (test-axis u3 u1)
                          (test-axis l1 l2)
-                         (values T :coplanar contact)))))
+                         (if (and (eq contact :penetrating)
+                                  (member l1 (list u1 u2 u3) :test (lambda (v1 v2)
+                                                                     (< (vsqrdistance v1 v2) (* threshold threshold))))
+                                  (member l2 (list u1 u2 u3) :test (lambda (v1 v2)
+                                                                     (< (vsqrdistance v1 v2) (* threshold threshold)))))
+                             (values T :coplanar :edge)
+                             (values T :coplanar contact))))))
                   (T
                    (d "General edge pairs~%")
                    (let ((contact normal-class))
                      (if (flet ((test-axis (u1 u2 v1 v2)
                                   (let ((c (vc (v- u2 u1) (v- v2 v1))))
-                                    (unless (< (vsqrlength c) threshold)
+                                    (unless (< (vsqrlength c) (* threshold threshold))
                                       (let ((c* (vunit c)))
                                         (multiple-value-bind (separatingp class)
-                                            (separating-axis-p c*)
+                                            (separating-axis-p c* threshold)
                                           (when (and (not separatingp)
                                                      (eq contact :penetrating)
                                                      (eq class :touching))
@@ -269,12 +278,17 @@
                                                    (when separatingp
                                                      (list :diffuse-factor #(1 0 0)))))
                                           separatingp))))))
-                           (prog1
-                               (loop :named outer
-                                     :for (a1 a2) :on (list u1 u2 u3 u1)
-                                     :while a2
-                                     :do (when (test-axis a1 a2 l1 l2)
-                                           (return-from outer T)))))
+                           ;; TODO(jmoringe): The last call is a hack
+                           ;; in case the triangle and the line
+                           ;; segment are actually coplanar but we
+                           ;; didn't detect it due to insufficient
+                           ;; precision.
+                           (or (loop for (a1 a2) on (list u1 u2 u3 u1)
+                                     while a2
+                                     do (when (test-axis a1 a2 l1 l2)
+                                          (return T)))
+                               (and (> (vsqrlength (vc normal-u (v- l1 l2))) (* threshold threshold))
+                                    (separating-axis-p (vunit (vc normal-u (v- l1 l2))) threshold))))
                          NIL
                          (values T NIL contact)))))))
       (d "=> ~A~:*~:[~; ~A ~A~]~%"
@@ -285,32 +299,38 @@
       (values result constellation contact))))
 
 (defun point-on-triangle-p (u1 u2 u3 v &key (threshold .00001))
-  (flet ((separating-axis-p (axis bias &optional note)
-           (let* ((du1    (+ (v. axis u1) bias))
-                  (du2    (+ (v. axis u2) bias))
-                  (du3    (+ (v. axis u3) bias))
-                  (dv     (v. axis v))
-                  (iu-min (min du1 du2 du3)) ; interval u min
-                  (iu-max (max du1 du2 du3)) ; interval u max
-                  )
-             (d "Axis~@[ ~A~] ~A~&~
+  (let ((contact :separating))
+    (flet ((separating-axis-p (axis bias &optional note)
+             (let* ((du1    (+ (v. axis u1) bias))
+                    (du2    (+ (v. axis u2) bias))
+                    (du3    (+ (v. axis u3) bias))
+                    (dv     (v. axis v))
+                    (iu-min (min du1 du2 du3)) ; interval u min
+                    (iu-max (max du1 du2 du3)) ; interval u max
+                    )
+               (d "Axis~@[ ~A~] ~A~&~
                  ~2@T=> {~5,2F ~5,2F ~5,2F} {~5,2F ~5,2F ~5,2F}~&~
                  ~2@T=> [~5,2F, ~5,2F] [~5,2F, ~5,2F]~%"
-                note axis bias
-                du1 du2 du3 dv dv dv
-                iu-min iu-max dv dv)
-             (let ((result (intervals-intersect-p iu-min iu-max dv dv
-                                                  :threshold threshold)))
-               (d "~2@T~A~%" (if result "not separating" "separating"))
-               (not result)))))
-    (let* ((normal-u (vunit (vc (v- u2 u1) (v- u3 u1))))
-           (n12      (vunit (vc normal-u (v- u2 u1)))) ; TODO compute when needed
-           (n23      (vunit (vc normal-u (v- u3 u2))))
-           (n31      (vunit (vc normal-u (v- u1 u3)))))
-      (d "--------------------~%")
-      (prog1
-          (and (< (abs (v. normal-u (v- v u1))) threshold)
-               (not (separating-axis-p n12 0))
-               (not (separating-axis-p n23 0))
-               (not (separating-axis-p n31 0)))
-        (d "--------------------~%")))))
+                  note axis bias
+                  du1 du2 du3 dv dv dv
+                  iu-min iu-max dv dv)
+               (multiple-value-bind (result contact*)
+                   (intervals-intersect-p iu-min iu-max dv dv
+                                          :threshold threshold)
+                 (when (eq contact* :touching)
+                   (setf contact contact*))
+                 (d "~2@T~A~%" (if result "not separating" "separating"))
+                 (not result)))))
+      (let* ((normal-u (vunit (vc (v- u2 u1) (v- u3 u1))))
+             (n12      (vunit (vc normal-u (v- u2 u1)))) ; TODO compute when needed
+             (n23      (vunit (vc normal-u (v- u3 u2))))
+             (n31      (vunit (vc normal-u (v- u1 u3)))))
+        (d "--------------------~%")
+        (multiple-value-prog1
+            (cond ((not (< (abs (v. normal-u (v- v u1))) threshold))
+                   nil)
+                  ((and (not (separating-axis-p n12 0))
+                        (not (separating-axis-p n23 0))
+                        (not (separating-axis-p n31 0)))
+                   (values t contact)))
+          (d "--------------------~%"))))))
