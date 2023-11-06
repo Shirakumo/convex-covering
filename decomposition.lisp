@@ -210,7 +210,7 @@
                (setf (patch-compactness patch) (compute-compactness all-vertices patch))
                patch)
               (T
-               NIL ; hull ; TODO(jmoringe): for debugging
+               (values nil patch) ; TODO(jmoringe): for debugging
                ))))))
 
 ;;; `patch-link' structure
@@ -235,12 +235,17 @@
 
 (defun make-patch-link (context patch1 patch2)
   (assert (not (eq patch1 patch2)))
-  (let ((result (make-merged-patch context patch1 patch2)))
-    (if result ; (typep result 'patch)
+  ;; TODO(jmoringe): When not debugging and RESULT is false, we would
+  ;; not receive the patch at all, not store any result in the patch
+  ;; link and not set the patch link of the patch.
+  (multiple-value-bind (result debug-patch) (make-merged-patch context patch1 patch2)
+    (if result
         (let ((link (%make-patch-link patch1 patch2 (/ (patch-compactness result)) result)))
           (setf (patch-link result) link)
           link)
-        (%make-patch-link patch1 patch2 most-positive-double-float result))))
+        (let ((link (%make-patch-link patch1 patch2 most-positive-double-float debug-patch)))
+          (setf (patch-link debug-patch) link)
+          link))))
 
 (defun link-patches (context a b) ; called in preparation phase for adjacent faces
   (unless (loop for link across (patch-links a) ; TODO make a predicate
