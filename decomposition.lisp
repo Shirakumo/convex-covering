@@ -8,7 +8,8 @@
 ;;; `hull'
 ;;;
 ;;; Internal data structure for representing convex hulls during the
-;;; decomposition computation. In contrast to the `convex-hull' type which is part of the API, this structure type
+;;; decomposition computation. In contrast to the `convex-hull' type
+;;; which is part of the API, this structure type
 ;;;
 ;;; 1. Stores vertex data using a concrete (double-float)
 ;;;    representation where `convex-hull' mirrors the component type
@@ -90,7 +91,8 @@
             (v3 (manifolds:v vertices c)))
         (nvmin min v1 v2 v3)
         (nvmax max v1 v2 v3)))
-    (center-and-size-from-min-and-max min max)))
+    ;; TODO(jmoringe): 3d-spaces should accept a threshold for overlapping queries
+    (center-and-size-from-min-and-max (v- min (dvec .001 .001 .001)) (v+ max (dvec .001 .001 .001)))))
 
 (declaim (inline bounding-box))
 (defun bounding-box (hull)
