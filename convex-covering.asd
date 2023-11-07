@@ -16,6 +16,7 @@
 
                (:file "geometry")
                (:file "context")
+               (:file "structures")
                (:file "merging")
                (:file "decomposition")
                (:file "documentation"))
