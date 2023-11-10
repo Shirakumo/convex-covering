@@ -9,9 +9,8 @@
 
 (defun merge-priority (link)
   (let ((cost (patch-link-merge-cost link)))
-    (if (= cost most-positive-double-float)
-        (ash 1 31)
-        (the (unsigned-byte 32) (floor cost 1/10000000)))))
+    (unless (= cost most-positive-double-float)
+      (the (unsigned-byte 32) (floor cost 1/10000000)))))
 
 (defvar *winner*)  ; the link that was selecting for merging in the current step; for visualization
 (defun next-link (queue links)
@@ -130,7 +129,9 @@
                                            (aref patchlist face) (aref patchlist other))
                   when link
                     do (setf (gethash link links) T)
-                       (damn-fast-priority-queue:enqueue merge-queue link (merge-priority link)))))))
+                       (let ((priority (merge-priority link)))
+                         (when priority
+                           (damn-fast-priority-queue:enqueue merge-queue link priority))))))))
     ;; (visualize-step patches 0)
     ;; 3. Greedily merge patches according to merge cost
     (let ((i 1))
@@ -180,7 +181,9 @@
                       (setf (gethash patch patches) T)
                       (loop for link across (patch-links patch)
                             do (setf (gethash link links) T)
-                               (damn-fast-priority-queue:enqueue merge-queue link (merge-priority link))))
+                               (let ((priority (merge-priority link)))
+                                 (when priority
+                                   (damn-fast-priority-queue:enqueue merge-queue link priority)))))
                  do                    ; consistency check
                     #+no (let ((linked-patches (make-hash-table :test #'eq))
                                (seen (make-hash-table :test #'eq)))
