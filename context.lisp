@@ -57,6 +57,44 @@
         do (space:enter info index)
         finally (return index)))
 
+;;; Edge index
+;;;
+;;; This allows efficiently finding edges that intersect a given
+;;; axis-aligned box.
+
+(defstruct (edge-info
+            (:constructor make-edge-info (vertex1 vertex2 center size/2))
+            (:predicate NIL)
+            (:copier NIL))
+  (vertex1 (error "required") :type dvec3 :read-only T)
+  (vertex2 (error "required") :type dvec3 :read-only T)
+  (center  (error "required") :type vec3  :read-only T)
+  (size/2  (error "required") :type vec3  :read-only T))
+
+(defmethod space:location ((object edge-info))
+  (edge-info-center object))
+
+(defmethod space:bsize ((object edge-info))
+  (edge-info-size/2 object))
+
+(defun index-edges (vertices faces)
+  (check-type vertices manifolds:vertex-array)
+  (check-type faces manifolds:face-array)
+  (let ((index (make-spatial-index)))
+    (flet ((add-edge (vertex1 vertex2)
+             (let ((min (vmin vertex1 vertex2))
+                   (max (vmax vertex1 vertex2)))
+               (multiple-value-bind (center size/2)
+                   (center-and-size-from-min-and-max min max)
+                 (let ((info (make-edge-info vertex1 vertex2 center size/2)))
+                   (space:enter info index))))))
+      (loop for edge across (manifolds:edge-list faces)
+            for v1 = (manifolds:v vertices (manifolds:start edge))
+            for v2 = (manifolds:v vertices (manifolds:end edge))
+            do (add-edge v1 v2) ))
+    (space:reoptimize index) ; TODO(jmoringe): use `space:enter-all' instead
+    index))
+
 ;;; Face index
 ;;;
 ;;; This allows efficiently finding faces that intersect a given
@@ -148,6 +186,7 @@
             (:constructor make-context (vertices faces
                                         &aux (vertex-position-index (index-vertex-positions vertices))
                                              (vertex-index          (index-vertices vertices))
+                                             (edge-index            (index-edges vertices faces))
                                              (face-index            (index-faces vertices faces))
                                              (boundary-edges        (manifolds:boundary-list faces))
                                              (boundary-edge-index   (index-boundary-edges
@@ -161,5 +200,6 @@
   ;; Index structures
   (vertex-position-index (error "required") :read-only T)
   (vertex-index          (error "required") :read-only T)
+  (edge-index            (error "required") :read-only T)
   (face-index            (error "required") :read-only T)
   (boundary-edge-index   (error "required") :read-only T))
