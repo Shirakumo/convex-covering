@@ -14,29 +14,11 @@
 
 (defvar *winner*)  ; the link that was selecting for merging in the current step; for visualization
 (defun next-link (queue links)
-  (let ((new-winner (loop for link = (damn-fast-priority-queue:dequeue queue)
-                          until (or (null link)
-                                    (and (gethash link links)
-                                         (< (patch-link-merge-cost link) most-positive-double-float)))
-                          finally (return link)))
-        #+old (old-winner (loop with min = most-positive-double-float
-                          with min-link = NIL
-                          for link being the hash-keys of links
-                          for cost = (patch-link-merge-cost link)
-                          do (when (< cost min)
-                               (setf min (patch-link-merge-cost link))
-                               (setf min-link link))
-                          finally #+no (when min-link
-                                         (format *trace-output* "=> ~5,2F ~A -- ~A => ~A~%"
-                                                 (patch-link-merge-cost min-link)
-                                                 (patch-debug-name (patch-link-a min-link))
-                                                 (patch-debug-name (patch-link-b min-link))
-                                                 (patch-debug-name (patch-link-merge-result min-link))))
-                                  (setf *winner* min-link)
-                                  (return min-link))))
-    #+old (unless (eq old-winner new-winner)
-      (break "~A" (cons old-winner new-winner)))
-    new-winner))
+  (loop for link = (damn-fast-priority-queue:dequeue queue)
+        until (or (null link)
+                  (and (gethash link links)
+                       (< (patch-link-merge-cost link) most-positive-double-float)))
+        finally (return link)))
 
 (defun link-other-patch (link this-patch)
   (cond ((eq this-patch (patch-link-a link))

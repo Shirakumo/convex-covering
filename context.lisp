@@ -78,6 +78,8 @@
   (face-info-size/2 object))
 
 (defun index-faces (vertices faces)
+  (check-type vertices manifolds:vertex-array)
+  (check-type faces manifolds:face-array)
   (let ((index (make-spatial-index)))
     (loop for i below (/ (length faces) 3)
           for (center size/2) = (multiple-value-list ; SBCL optimizes this away
