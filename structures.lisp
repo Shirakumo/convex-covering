@@ -46,16 +46,28 @@
                                            :element-type 'manifolds:u32
                                            :initial-contents global-faces))))
 
-(defun hull-flat-p (hull &key (threshold .0001))
-  (let ((vertices (hull-vertices hull)))
+(defun hull-flat-p (hull &key (threshold .005))
+  (let ((vertices (hull-vertices hull))
+        (faces (hull-facets hull)))
     (or (<= (length vertices) (* 3 3))
-        (let* ((a      (manifolds:v vertices 0))
-               (b      (manifolds:v vertices 1))
-               (c      (manifolds:v vertices 2))
-               (normal (vunit (vc (v- b a) (v- c a)))))
-          (loop for i from 3 below (/ (length vertices) 3)
+        ;; For computing the normal and "reference point", find the
+        ;; face with the largest area to hopefully reduce numerical
+        ;; issues.
+        (let ((best-centroid nil)
+              (best-normal   nil)
+              (best-area     nil))
+          (dotimes (i (/ (length faces) 3))
+            (let ((area (manifolds:face-area vertices faces i)))
+              (when (or (null best-area) (> area best-area))
+                (setf best-area area)
+                (let ((a (manifolds:v vertices (aref faces (+ (* 3 i) 0))))
+                      (b (manifolds:v vertices (aref faces (+ (* 3 i) 1))))
+                      (c (manifolds:v vertices (aref faces (+ (* 3 i) 2)))))
+                  (setf best-normal (vunit (vc (v- b a) (v- c a)))
+                        best-centroid (v/ (v+ a b c) 3))))))
+          (loop for i below (/ (length vertices) 3)
                 for v = (manifolds:v vertices i)
-                always (<= (abs (v. normal (v- v a))) threshold))))))
+                always (<= (abs (v. best-normal (v- v best-centroid))) threshold))))))
 
 (defun compute-facet-normals (hull) ; TODO(jmoringe): these are just face normals for now
   (loop with vertices = (hull-vertices hull)
