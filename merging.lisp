@@ -7,7 +7,8 @@
           (handler-case
               (let ((hull (patch-hull patch)))
                 (and ; (not (find-vertex-in-hull hull context))
-                     (not (find-edge-in-hull hull context))
+                     ; (not (find-edge-in-hull hull context))
+                     (not (find-edge-in-hull/edge-index hull context))
                      (normals-matching-p patch hull context)
                      (not (find-boundary-constraint-bar hull context))
                      (not (find-negative-side-touching-triangle hull))))
@@ -178,6 +179,79 @@
                      (return T))))))
     (setf (hull-problem hull) :edge)
     T))
+
+(defun find-edge-in-hull/edge-index (hull context)
+  (declare (type hull hull))
+  (let ((hull-vertices (hull-vertices hull))
+        (hull-facets (hull-facets hull)))
+    ;; TODO(jmoringe): could do overlapping queries for
+    ;; individual hull facets
+    #+no (format *trace-output* "~&; Hull ~X, facets ~:D~%"
+            (sxhash hull)
+            (/ (length hull-facets) 3))
+    (flet ((check-pair (a b c v1 v2)
+             (multiple-value-bind (result constellation contact)
+                 (line-intersects-triangle-p a b c v1 v2 :threshold 1d-4)
+               (when (member :edges *debug-visualizations*)
+                 (push (list :triangle a b c :color '(.4 .4 .2))
+                       (hull-annotations hull)))
+               (when (and result
+                          (case contact
+                            (:touching
+                             (when (member :edges *debug-visualizations*)
+                               (push (list :line v1 v2 :color '(.2 .2 .4))
+                                     (hull-annotations hull)))
+                             ;; The edge is just touching the hull facet. Could be touching
+                             ;; at a vertex of the hull facet or in the (2d) interior of the
+                             ;; hull facet. For each end point of the edge, generate a sample
+                             ;; point that is offset towards the center of the edge from the
+                             ;; end point and test whether that point is properly inside the
+                             ;; hull. Chose the offset large enough so handle an edge that is
+                             ;; almost coplanar to the hull facet (assume 1° incidence angle
+                             ;; as the worst case).
+                             (let* ((threshold -1e-2)
+                                    (diff      (v- v2 v1))
+                                    (delta     (v* diff (min .5 (* 1.5
+                                                                   (/ (sin (/ pi 180)))
+                                                                   (abs threshold)
+                                                                   (/ (vlength diff)))))))
+                               (or (vertex-in-hull-p* (v+ v1 delta) hull :eps threshold)
+                                   (vertex-in-hull-p* (v- v2 delta) hull :eps threshold))))
+                            (:penetrating
+                             (when (member :edges *debug-visualizations*)
+                               (push (list :line v1 v2 :color '(.2 .4 .4))
+                                     (hull-annotations hull)))
+                             ;; The edge is penetrating the hull face. If the edge and the hull
+                             ;; face are coplanar, this is not a problem since the two may just
+                             ;; be parts of different triangulations of a non-triangle mesh face.
+                             ;; Other forms of penetrating contact make the hull invalid.
+                             (not (eq constellation :coplanar)))))
+                 (when (member :edges *debug-visualizations*)
+                   (push (list :triangle a b c :color '(1 .5 0))
+                         (hull-annotations hull))
+                   (push (list :line v1 v2 :color '(1 0 .5))
+                         (hull-annotations hull)))
+                 (return-from find-edge-in-hull/edge-index T)))))
+      (if (< (length hull-facets) (* 3 10))
+          (space:do-overlapping (edge-info (context-edge-index context) hull NIL)
+            (let ((v1 (edge-info-vertex1 edge-info))
+                  (v2 (edge-info-vertex2 edge-info)))
+              (manifolds:do-faces (ai bi ci hull-facets) ; TODO use bounding box when few facets
+                (let* ((a   (manifolds:v hull-vertices ai))
+                       (b   (manifolds:v hull-vertices bi))
+                       (c   (manifolds:v hull-vertices ci)))
+                  (check-pair a b c v1 v2)))))
+          (manifolds:do-faces (ai bi ci hull-facets NIL) ; TODO use bounding box when few facets
+            (let* ((a   (manifolds:v hull-vertices ai))
+                   (b   (manifolds:v hull-vertices bi))
+                   (c   (manifolds:v hull-vertices ci))
+                   (min (vec (v- (vmin a b c) (dvec .001 .001 .001))))
+                   (max (vec (v+ (vmax a b c) (dvec .001 .001 .001)))))
+              (let ((region (space::%region (org.shirakumo.fraf.math.vectors::varr3 min) (v- max min))))
+                (space:do-overlapping (edge-info (context-edge-index context) region)
+                  (let ((v1 (edge-info-vertex1 edge-info))
+                        (v2 (edge-info-vertex2 edge-info)))
+                    (check-pair a b c v1 v2))))))))))
 
 (defun face-overlaps-or-matches-facet-p (hull-vertices hull-faces facet-index v1 v2 v3
                                          &key (threshold 0) hull)
