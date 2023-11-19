@@ -268,13 +268,15 @@
   ;; not receive the patch at all, not store any result in the patch
   ;; link and not set the patch link of the patch.
   (multiple-value-bind (result debug-patch) (make-merged-patch context patch1 patch2)
-    (if result
-        (let ((link (%make-patch-link patch1 patch2 (/ (patch-compactness result)) result)))
-          (setf (patch-link result) link)
-          link)
-        (let ((link (%make-patch-link patch1 patch2 most-positive-double-float debug-patch)))
-          (setf (patch-link debug-patch) link)
-          link))))
+    (let ((cost (when result
+                  (funcall (context-cost-function context) result patch1 patch2))))
+      (if cost
+          (let ((link (%make-patch-link patch1 patch2 cost result)))
+            (setf (patch-link result) link)
+            link)
+          (let ((link (%make-patch-link patch1 patch2 most-positive-double-float debug-patch)))
+            (when debug-patch (setf (patch-link debug-patch) link))
+            link)))))
 
 (defun link-patches (context a b) ; called in preparation phase for adjacent faces
   (unless (loop for link across (patch-links a) ; TODO make a predicate

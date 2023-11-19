@@ -12,11 +12,16 @@
     (unless (= cost most-positive-double-float)
       (the (unsigned-byte 32) (floor cost 1/10000000)))))
 
+(defun maybe-enqueue-link (link queue)
+  (let ((priority (merge-priority link)))
+    (when priority
+      (damn-fast-priority-queue:enqueue queue link priority))))
+
 (defun next-link (queue links)
   (loop for link = (damn-fast-priority-queue:dequeue queue)
         until (or (null link)
                   (and (gethash link links)
-                       (< (patch-link-merge-cost link) most-positive-double-float)))
+                       (< (patch-link-merge-cost link) most-positive-double-float))) ; TODO(jmoringe): should not happen
         finally (return link)))
 
 (defun link-other-patch (link this-patch)
@@ -80,13 +85,13 @@
      vertices)))
 
 ;;; TODO(jmoringe): rename indices -> faces
-(defun decompose (vertices indices &key)
+(defun decompose (vertices indices &key (merge-cost #'/compactness))
   (check-input vertices indices)
   ;; FIXME: This is all really dumb and uses really bad data structures
   ;;        Could definitely be optimised a lot by someone smarter
   (let* ((vertex-component-type (determine-vertex-component-type vertices))
          (vertices (coerce-input vertices vertex-component-type))
-         (context (make-context vertices indices))
+         (context (make-context vertices indices (coerce-to-cost-function merge-cost)))
          (patches (make-hash-table :test 'eq))
          (links (make-hash-table :test 'eq))
          (merge-queue (damn-fast-priority-queue:make-queue)))

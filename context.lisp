@@ -183,7 +183,7 @@
 ;;; spatial index structures.
 
 (defstruct (context
-            (:constructor make-context (vertices faces
+            (:constructor make-context (vertices faces cost-function
                                         &aux (vertex-position-index (index-vertex-positions vertices))
                                              (vertex-index          (index-vertices vertices))
                                              (edge-index            (index-edges vertices faces))
@@ -197,6 +197,8 @@
   (vertices              (error "required") :type (manifolds:vertex-array manifolds:f64) :read-only T)
   (faces                 (error "required") :type manifolds:face-array :read-only T)
   (boundary-edges        (error "required") :read-only T) ; TODO types
+  ;; Cost function and other parameters
+  (cost-function         (error "required") :type function :read-only T)
   ;; Index structures
   (vertex-position-index (error "required") :read-only T)
   (vertex-index          (error "required") :read-only T)

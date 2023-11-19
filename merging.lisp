@@ -1,5 +1,62 @@
 (in-package #:org.shirakumo.fraf.convex-covering)
 
+;;; Merge costs
+
+(deftype merge-cost-function ()
+  '(function (patch patch patch) (values (or null double-float) &optional nil)))
+
+(defun coerce-to-cost-function (thing)
+  (typecase thing
+    (symbol (fdefinition thing))
+    (function thing)
+    ((cons t null) (coerce-to-cost-function (first thing)))
+    (list (apply #'combine (mapcar #'coerce-to-cost-function thing)))))
+
+(declaim (ftype merge-cost-function /compactness patch-size-symmetry))
+
+(defun /compactness (merged-patch patch1 patch2)
+  (declare (ignore patch1 patch2))
+  (/ (patch-compactness merged-patch)))
+
+(defun patch-size-symmetry (merged-patch patch1 patch2)
+  (declare (optimize speed (safety 1))
+           (ignore merged-patch))
+  (flet ((patch-hull-facet-count (patch)
+           (let ((hull (patch-hull patch)))
+             (if hull
+                 (length (hull-facets hull))
+                 1))))
+    (coerce (log (1+ (abs (- (patch-hull-facet-count patch1)
+                             (patch-hull-facet-count patch2)))))
+            'double-float)))
+
+(defun make-patch-size-limit (limit)
+  (declare (type manifolds:u32 limit))
+  (lambda (merged-patch patch1 patch2)
+    (declare (optimize speed (safety 1))
+             (ignore patch1 patch2))
+    (let ((hull (patch-hull merged-patch)))
+      (cond ((null hull)
+             0)
+            ((< (length (hull-facets hull)) limit)
+             0)
+            (T
+             NIL)))))
+
+(let ((cache (make-hash-table :test #'equal)))
+  (defun combine (&rest functions)
+    (or (gethash functions cache)
+        (setf (gethash functions cache)
+              (let ((variables '()))
+                (labels ((call (function)
+                           (let ((variable (gensym "COMPONENT")))
+                             (push variable variables)
+                             `(,variable (funcall ,function merged-patch patch1 patch2)))))
+                  (compile nil `(lambda (merged-patch patch1 patch2)
+                                  (let (,@(mapcar #'call functions))
+                                    (when (and ,@variables)
+                                      (+ ,@variables)))))))))))
+
 ;;; Merge validity
 
 (defun valid-patch-p (patch context)
