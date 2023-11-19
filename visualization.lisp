@@ -159,15 +159,16 @@
            (when (or (both-directions? graph)
                      (eq (patch-link-a link) object))
              (let* ((result     (patch-link-merge-result link))
-                    (color      (cond ((eq link *winner*)
+                    (color      (cond (NIL ; (eq link *winner*)
                                        "orange")
                                       ((typep result 'patch)
                                        "green")
-                                      (t
+                                      (T
                                        "red")))
                     (label      (when (typep result 'convex-hull)
                                   (format nil "~(~A~)" (hull-problem result))))
-                    (width      (if (eq link *winner*) 5 nil))
+                    (width      NIL ; (if (eq link *winner*) 5 NIL)
+                                )
                     (attributes `(:color ,color
                                   ,@(when width
                                       `(:penwidth ,width))

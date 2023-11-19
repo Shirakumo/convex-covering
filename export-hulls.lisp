@@ -2,10 +2,10 @@
 
 (defun export-hulls (hulls file &key (colors (make-color-generator))
                                      alpha
-                                     (highlight nil))
+                                     (highlight NIL))
   (org.shirakumo.fraf.wavefront:serialize
    (append (loop for hull across hulls
-                 for i :from 0
+                 for i from 0
                  for color = (if colors
                                  (funcall colors i)
                                  (color<-faces (etypecase hull
@@ -42,9 +42,6 @@
                    (patch-edge  (make-instance 'org.shirakumo.fraf.wavefront:material
                                                :name "patch-edge"
                                                :diffuse-factor #(0.7 0.7 0.7)))
-                   (facet-edge (make-instance 'org.shirakumo.fraf.wavefront:material
-                                              :name "facet-boundary"
-                                              :diffuse-factor #(0.7 0.7 0.7)))
                    (facet (make-instance 'org.shirakumo.fraf.wavefront:material
                                          :name "facet"
                                          :diffuse-factor #(0.2 0.2 0.2)))
@@ -59,9 +56,9 @@
                                              :name "face-edge"
                                              :diffuse-factor #(0.7 0.7 1.0)))
                    (annotation-count 0))
-               (loop :with hull = (patch-hull highlight)
-                     :for (vertex . kind) :in (remove :face-centroid (hull-annotations hull) :key #'cdr)
-                     :for (color offset sample-count)
+               (loop with hull = (patch-hull highlight)
+                     for (vertex . kind) in (remove :face-centroid (hull-annotations hull) :key #'cdr)
+                     for (color offset sample-count)
                         = (multiple-value-list
                            (ecase kind
                              (:bad            (values bad          .1   16))
@@ -79,7 +76,7 @@
                              (:bad-normal     (values bad          .1   16))
 
                              (:face-edge      (values face-edge    .005 16))))
-                     :for name = (format nil "annotation~A" (incf annotation-count))
+                     :for name = (format NIL "annotation~A" (incf annotation-count))
                      :collect (debug-cube vertex name color :offset offset)))))
    file :if-exists :supersede)
   hulls)

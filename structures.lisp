@@ -148,7 +148,7 @@
   ;; Debug information
   (link))
 
-(defun make-patch (all-vertices a b c)
+(defun make-initial-patch (all-vertices a b c)
   (let* ((faces        (make-array 3 :element-type     'manifolds:u32
                                      :initial-contents (list a b c)))
          (surface-area (manifolds:face-area all-vertices faces 0)))

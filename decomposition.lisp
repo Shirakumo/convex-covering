@@ -12,7 +12,6 @@
     (unless (= cost most-positive-double-float)
       (the (unsigned-byte 32) (floor cost 1/10000000)))))
 
-(defvar *winner*)  ; the link that was selecting for merging in the current step; for visualization
 (defun next-link (queue links)
   (loop for link = (damn-fast-priority-queue:dequeue queue)
         until (or (null link)
@@ -80,7 +79,8 @@
     (manifolds:f64
      vertices)))
 
-(defun decompose (vertices indices &key) ; TODO(jmoringe) indices -> faces
+;;; TODO(jmoringe): rename indices -> faces
+(defun decompose (vertices indices &key)
   (check-input vertices indices)
   ;; FIXME: This is all really dumb and uses really bad data structures
   ;;        Could definitely be optimised a lot by someone smarter
@@ -89,16 +89,12 @@
          (context (make-context vertices indices))
          (patches (make-hash-table :test 'eq))
          (links (make-hash-table :test 'eq))
-
-         (merge-queue (damn-fast-priority-queue:make-queue))
-
-         (*winner* NIL))
+         (merge-queue (damn-fast-priority-queue:make-queue)))
     ;; 1. Destructure the mesh into one patch per face
     (let ((patchlist (make-array (truncate (length indices) 3)))
           (i 0))
       (manifolds:do-faces (a b c indices)
-        (let ((patch (make-patch vertices a b c)))
-                                        ; (setf (patch-hull patch) (compute-patch-convex-hull vertices (patch-faces patch)))
+        (let ((patch (make-initial-patch vertices a b c)))
           (setf (gethash patch patches) T)
           (setf (aref patchlist i) patch)
           (incf i)))
