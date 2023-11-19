@@ -239,7 +239,8 @@
 
 (defun find-edge-in-hull/edge-index (hull context)
   (declare (type hull hull))
-  (let ((hull-vertices (hull-vertices hull))
+  (let ((tolerance (context-edge-tolerance context))
+        (hull-vertices (hull-vertices hull))
         (hull-facets (hull-facets hull)))
     ;; TODO(jmoringe): could do overlapping queries for
     ;; individual hull facets
@@ -248,7 +249,7 @@
             (/ (length hull-facets) 3))
     (flet ((check-pair (a b c v1 v2)
              (multiple-value-bind (result constellation contact)
-                 (line-intersects-triangle-p a b c v1 v2 :threshold 1d-4)
+                 (line-intersects-triangle-p a b c v1 v2 :threshold 1d-4 :tolerance tolerance)
                (when (member :edges *debug-visualizations*)
                  (push (list :triangle a b c :color '(.4 .4 .2))
                        (hull-annotations hull)))
@@ -266,7 +267,8 @@
                              ;; hull. Chose the offset large enough so handle an edge that is
                              ;; almost coplanar to the hull facet (assume 1° incidence angle
                              ;; as the worst case).
-                             (let* ((threshold -1e-2)
+                             (let* ((threshold (- (sqrt tolerance)) ; -1e-2
+                                               )
                                     (diff      (v- v2 v1))
                                     (delta     (v* diff (min .5 (* 1.5
                                                                    (/ (sin (/ pi 180)))
@@ -332,7 +334,8 @@
 (defun normals-matching-p (patch hull context)
   (declare (type hull hull))
   (or (hull-flat-p hull)
-      (let ((all-vertices (context-vertices context))
+      (let ((tolerance (context-normals-tolerance context))
+            (all-vertices (context-vertices context))
             (all-faces (context-faces context))
             (hull-vertices (hull-vertices hull))
             (hull-faces (hull-facets hull)))
@@ -358,7 +361,7 @@
 
            (when (not (loop for i below (/ (length hull-faces) 3)
                             for (facet-centroid . facet-normal) in (facet-normals hull)
-                            always (if (and (< (abs (- -1 (v. face-normal (the dvec3 facet-normal)))) .0001)
+                            always (if (and (< (abs (- -1 (v. face-normal (the dvec3 facet-normal)))) tolerance)
                                             (face-overlaps-or-matches-facet-p
                                              hull-vertices hull-faces i a b c :threshold .0001 :hull hull))
                                        (let ( ; (*debug-output* T)

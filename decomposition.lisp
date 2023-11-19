@@ -85,13 +85,18 @@
      vertices)))
 
 ;;; TODO(jmoringe): rename indices -> faces
-(defun decompose (vertices indices &key (merge-cost #'/compactness))
+(defun decompose (vertices indices &key (merge-cost #'/compactness)
+                                        (tolerance         1d-4)
+                                        (edge-tolerance    tolerance)
+                                        (normals-tolerance 1d-4 #+TODO tolerance))
   (check-input vertices indices)
   ;; FIXME: This is all really dumb and uses really bad data structures
   ;;        Could definitely be optimised a lot by someone smarter
   (let* ((vertex-component-type (determine-vertex-component-type vertices))
          (vertices (coerce-input vertices vertex-component-type))
-         (context (make-context vertices indices (coerce-to-cost-function merge-cost)))
+         (context (make-context vertices indices (coerce-to-cost-function merge-cost)
+                                :edge-tolerance    (coerce edge-tolerance 'double-float)
+                                :normals-tolerance (coerce normals-tolerance 'double-float)))
          (patches (make-hash-table :test 'eq))
          (links (make-hash-table :test 'eq))
          (merge-queue (damn-fast-priority-queue:make-queue)))

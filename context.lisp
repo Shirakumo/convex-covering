@@ -184,6 +184,8 @@
 
 (defstruct (context
             (:constructor make-context (vertices faces cost-function
+                                        &key (edge-tolerance    1d-4)
+                                             (normals-tolerance 1d-4)
                                         &aux (vertex-position-index (index-vertex-positions vertices))
                                              (vertex-index          (index-vertices vertices))
                                              (edge-index            (index-edges vertices faces))
@@ -199,6 +201,8 @@
   (boundary-edges        (error "required") :read-only T) ; TODO types
   ;; Cost function and other parameters
   (cost-function         (error "required") :type function :read-only T)
+  (edge-tolerance        (error "required") :type double-float :read-only T)
+  (normals-tolerance     (error "required") :type double-float :read-only T)
   ;; Index structures
   (vertex-position-index (error "required") :read-only T)
   (vertex-index          (error "required") :read-only T)
