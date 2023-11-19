@@ -38,7 +38,7 @@
 
 ;;; Intersections via Separating Axis Theorem
 
-(defun intervals-intersect-p (i1-min i1-max i2-min i2-max &key (threshold 1d-6))
+(defun intervals-intersect-p (i1-min i1-max i2-min i2-max &key (tolerance 1d-6) (threshold 1d-6))
   (declare (type double-float i1-min i1-max i2-min i2-max)
            (optimize (speed 3)))
   ;; case 1 | s1 e1 s2 e2
@@ -47,21 +47,22 @@
   ;; case 4 | s2 s1 e1 e2 *
   ;; case 5 | s2 s1 e2 e1 *
   ;; case 6 | s2 e2 s1 e1
-  (let ((threshold (coerce threshold 'double-float)))
+  (let ((tolerance (coerce tolerance 'double-float)) ; TODO avoid coercion
+        (threshold (coerce threshold 'double-float)))
     (cond ((<= (abs (- (min i1-min i2-min) (max i1-max i2-max))) threshold)
            (values T :identical))
           ((<= i1-min i2-min i1-max i2-max) ; case 2
            (d "~4@TOverlap ~A~%"
               (abs (- i2-min i1-max)))
-           (values T (if (< (abs (- i2-min i1-max)) threshold) :touching :penetrating)))
+           (values T (if (<= (- i1-max i2-min) tolerance) :touching :penetrating)))
           ((<= i1-min i2-min i2-max i1-max) ; case 3
            (d "~4@TI₂ ⊂ I₁ (case 3) Overlaps ~A ~A | threshold ~A~%"
               (abs (- i1-min i2-min))   ; cases 3 4
               (abs (- i1-max i2-max))   ; cases 3 4
               threshold)
-           (values T (if (and (< (abs (- i2-min i2-max)) threshold)
-                              (or (< (abs (- i1-min i2-min)) threshold)
-                                  (< (abs (- i1-max i2-min)) threshold)))
+           (values T (if (and (< (- i2-max i2-min) tolerance)
+                              (or (< (- i2-min i1-min) tolerance)
+                                  (< (- i1-max i2-min) tolerance)))
                          :touching
                          :penetrating)))
           ((<= i2-min i1-min i1-max i2-max) ; case 4
@@ -69,15 +70,15 @@
               (abs (- i1-min i2-min))   ; cases 3 4
               (abs (- i1-max i2-max))   ; cases 3 4
               )
-           (values T (if (and (< (abs (- i1-min i1-max)) threshold)
-                              (or (< (abs (- i2-min i1-min)) threshold)
-                                  (< (abs (- i2-max i1-min)) threshold)))
+           (values T (if (and (< (- i1-max i1-min) tolerance)
+                              (or (< (- i1-min i2-min) tolerance)
+                                  (< (- i2-max i1-min) tolerance)))
                          :touching
                          :penetrating)))
           ((<= i2-min i1-min i2-max i1-max) ; case 5
            (d "~4@TOverlap ~A~%"
               (abs (- i1-min i2-max)))
-           (values T (if (< (abs (- i1-min i2-max)) threshold) :touching :penetrating)))
+           (values T (if (< (- i2-max i1-min) tolerance) :touching :penetrating)))
           #+no ((not (or (> (- i2-min i1-max) threshold)
                          (> (- i1-min i2-max) threshold)))
                 (d "~4@TOverlaps ~A ~A ~A ~A~%"
@@ -179,7 +180,7 @@
       (d "--------------------~%")
       (values result constellation contact))))
 
-(defun line-intersects-triangle-p (u1 u2 u3 l1 l2 &key (threshold 1d-6))
+(defun line-intersects-triangle-p (u1 u2 u3 l1 l2 &key (tolerance 1d-6) (threshold 1d-6))
   (declare (type dvec3 u1 u2 u3 l1 l2))
   (d "U~2@T~A~%~2@T~A~%~2@T~A~%L~2@T~A~%~2@T~A~%" u1 u2 u3 l1 l2)
   (flet ((separating-axis-p (axis threshold)
@@ -201,7 +202,7 @@
                 iu-min iu-max iv-min iv-max)
              (multiple-value-bind (intersectp class)
                  (intervals-intersect-p iu-min iu-max iv-min iv-max
-                                        :threshold threshold)
+                                        :tolerance tolerance :threshold threshold)
                (d "~4@T=> ~A~@[ | ~A~]~%" (if intersectp "not separating" "separating") class)
                (values (not intersectp) class)))))
     (d "--------------------~%")
