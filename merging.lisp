@@ -238,11 +238,29 @@
     (setf (hull-problem hull) :edge)
     T))
 
+(defun hull-edge-index (hull)
+  (let ((global-faces (hull-global-faces hull))
+        (index (make-hash-table :test #'eql)))
+    (flet ((edge (from to)
+             (let ((key (if (< from to)
+                            (logior (ash from 32) to)
+                            (logior (ash to   32) from))))
+               (setf (gethash key index) T))))
+      (loop for i below (length global-faces) by 3
+            for a = (aref global-faces (+ i 0))
+            for b = (aref global-faces (+ i 1))
+            for c = (aref global-faces (+ i 2))
+            do (edge a b)
+               (edge b c)
+               (edge c a)))
+    index))
+
 (defun find-edge-in-hull/edge-index (hull context)
   (declare (type hull hull))
   (let ((tolerance (context-edge-tolerance context))
         (hull-vertices (hull-vertices hull))
-        (hull-facets (hull-facets hull)))
+        (hull-facets (hull-facets hull))
+        (edge-index (hull-edge-index hull)))
     ;; TODO(jmoringe): could do overlapping queries for
     ;; individual hull facets
     #+no (format *trace-output* "~&; Hull ~X, facets ~:D~%"
@@ -294,13 +312,15 @@
                  (return-from find-edge-in-hull/edge-index T)))))
       (if (< (length hull-facets) (* 3 10))
           (space:do-overlapping (edge-info (context-edge-index context) hull NIL)
-            (let ((v1 (edge-info-vertex1 edge-info))
-                  (v2 (edge-info-vertex2 edge-info)))
-              (manifolds:do-faces (ai bi ci hull-facets) ; TODO use bounding box when few facets
-                (let* ((a   (manifolds:v hull-vertices ai))
-                       (b   (manifolds:v hull-vertices bi))
-                       (c   (manifolds:v hull-vertices ci)))
-                  (check-pair a b c v1 v2)))))
+            (let ((key (edge-info-key edge-info)))
+              (unless (gethash key edge-index)
+                (let ((v1 (edge-info-vertex1 edge-info))
+                      (v2 (edge-info-vertex2 edge-info)))
+                  (manifolds:do-faces (ai bi ci hull-facets) ; TODO use bounding box when few facets
+                    (let* ((a   (manifolds:v hull-vertices ai))
+                           (b   (manifolds:v hull-vertices bi))
+                           (c   (manifolds:v hull-vertices ci)))
+                      (check-pair a b c v1 v2)))))))
           (manifolds:do-faces (ai bi ci hull-facets NIL) ; TODO use bounding box when few facets
             (let* ((a   (manifolds:v hull-vertices ai))
                    (b   (manifolds:v hull-vertices bi))
@@ -309,9 +329,11 @@
                    (max (vec (v+ (vmax a b c) (dvec .001 .001 .001)))))
               (let ((region (space::%region (org.shirakumo.fraf.math.vectors::varr3 min) (v- max min))))
                 (space:do-overlapping (edge-info (context-edge-index context) region)
-                  (let ((v1 (edge-info-vertex1 edge-info))
-                        (v2 (edge-info-vertex2 edge-info)))
-                    (check-pair a b c v1 v2))))))))))
+                  (let ((key (edge-info-key edge-info)))
+                    (unless (gethash key edge-index)
+                      (let ((v1 (edge-info-vertex1 edge-info))
+                            (v2 (edge-info-vertex2 edge-info)))
+                        (check-pair a b c v1 v2))))))))))))
 
 (defun face-overlaps-or-matches-facet-p (hull-vertices hull-faces facet-index v1 v2 v3
                                          &key (threshold 0) hull)

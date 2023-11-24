@@ -63,9 +63,14 @@
 ;;; axis-aligned box.
 
 (defstruct (edge-info
-            (:constructor make-edge-info (vertex1 vertex2 center size/2))
+            (:constructor make-edge-info (key vertex1 vertex2 center size/2))
             (:predicate NIL)
             (:copier NIL))
+  ;; The key is used to identify the edge when testing whether it is
+  ;; part of a hull. The key consists of the indices into the mesh
+  ;; vertex array encoded as (logior (ash IS 32) IL) where IS is the
+  ;; smaller of the two indices.
+  (key     (error "required") :type (unsigned-byte 64) :read-only T)
   (vertex1 (error "required") :type dvec3 :read-only T)
   (vertex2 (error "required") :type dvec3 :read-only T)
   (center  (error "required") :type vec3  :read-only T)
@@ -81,17 +86,22 @@
   (check-type vertices manifolds:vertex-array)
   (check-type faces manifolds:face-array)
   (let ((index (make-spatial-index)))
-    (flet ((add-edge (vertex1 vertex2)
+    (flet ((add-edge (key vertex1 vertex2)
              (let ((min (vmin vertex1 vertex2))
                    (max (vmax vertex1 vertex2)))
                (multiple-value-bind (center size/2)
                    (center-and-size-from-min-and-max min max)
-                 (let ((info (make-edge-info vertex1 vertex2 center size/2)))
+                 (let ((info (make-edge-info key vertex1 vertex2 center size/2)))
                    (space:enter info index))))))
       (loop for edge across (manifolds:edge-list faces)
-            for v1 = (manifolds:v vertices (manifolds:start edge))
-            for v2 = (manifolds:v vertices (manifolds:end edge))
-            do (add-edge v1 v2) ))
+            for i1 = (manifolds:start edge)
+            for i2 = (manifolds:end edge)
+            for key = (if (< i1 i2) ; TODO(jmoringe): make a function
+                          (logior (ash i1 32) i2)
+                          (logior (ash i2 32) i1))
+            for v1 = (manifolds:v vertices i1)
+            for v2 = (manifolds:v vertices i2)
+            do (add-edge key v1 v2)))
     (space:reoptimize index) ; TODO(jmoringe): use `space:enter-all' instead
     index))
 

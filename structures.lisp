@@ -13,7 +13,7 @@
 ;;; 2. Stores additional information such as normals and bounding boxes
 
 (defstruct (hull
-            (:constructor %make-hull (vertices facets flat-p global-faces))
+            (:constructor %make-hull (vertices facets flat-p global-faces #+no global-edges))
             (:copier NIL)
             (:predicate NIL))
   (vertices      (error "required") :type (manifolds:vertex-array manifolds:f64) :read-only T)
@@ -23,6 +23,7 @@
   ;; Maybe essential
   (flat-p        (error "required") :type boolean :read-only T)
   (global-faces  #() :type manifolds:face-array :read-only T)
+  ; (global-edges  (error "required") :type hash-table #+no (simple-array (unsigned-byte 64) 1) :read-only T)
   ;; Debugging
   (annotations   '() :type list)
   (problem       NIL))
@@ -31,6 +32,7 @@
   (let ((global-faces (make-array 0 :element-type 'manifolds:u32
                                     :adjustable T
                                     :fill-pointer 0)) ; TODO(jmoringe): remove adjust-ability before returning?
+        ; (global-edges (make-hash-table :test #'eql))
         )
     (manifolds:do-faces (a/li b/li c/li faces)
       (let* ((a    (manifolds:v vertices a/li))
@@ -42,10 +44,20 @@
         (when (and a/gi b/gi c/gi)
           (vector-push-extend a/gi global-faces)
           (vector-push-extend b/gi global-faces)
-          (vector-push-extend c/gi global-faces))))
+          (vector-push-extend c/gi global-faces)
+          #+no (flet ((edge (from to)
+                   (let ((key (if (< from to)
+                                  (logior (ash from 32) to)
+                                  (logior (ash to   32) from))))
+                     (setf (gethash key global-edges) T))))
+            (edge a/gi b/gi)
+            (edge b/gi c/gi)
+            (edge c/gi a/gi)))))
     (%make-hull vertices faces flat-p (make-array (length global-faces)
                                                   :element-type 'manifolds:u32
-                                                  :initial-contents global-faces))))
+                                                  :initial-contents global-faces)
+                ; global-edges
+                )))
 
 #+TODO-unused
 (defun hull-flat-p* (hull &key (threshold .005))
