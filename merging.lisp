@@ -90,21 +90,22 @@
                                         ; (not (> (v. facet-normal (v- vertex facet-centroid)) .0001))
                   (< (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid))) eps)))))
 
-;;;
-(defun vertex-in-hull-p* (vertex hull &key (eps 1e-6))
+(defun vertex-in-hull-p* (vertex hull &key (eps 1d-6))
   (declare (type hull hull)
-           (type dvec3 vertex))
+           (type dvec3 vertex)
+           (type double-float eps)
+           (optimize speed))
   (destructuring-bind (center . size/2) (bounding-box hull)
     (declare (type vec3 center size/2))
-    (let* ((abs-eps (abs eps))
-           (offset  (vec abs-eps abs-eps abs-eps)))
-      (and (v<= (v- center size/2 offset)
-                (vec3 (vx vertex) (vy vertex) (vz vertex))
-                (v+ center size/2 offset)) ; TODO avoid conversion
+    (and (let ((abs-eps (abs eps)))
+           (and (<= (abs (- (vx center) (vx vertex))) (+ (vx size/2) abs-eps))
+                (<= (abs (- (vy center) (vy vertex))) (+ (vy size/2) abs-eps))
+                (<= (abs (- (vz center) (vz vertex))) (+ (vz size/2) abs-eps))))
+         (let ((temp (dvec 0 0 0)))
+           (declare (dynamic-extent temp) (type dvec3 temp))
            (loop for (facet-centroid . facet-normal) in (facet-normals hull)
-                 for depth = (v. (the dvec3 facet-normal) (v- vertex (the dvec3 facet-centroid)))
-                 do (when *debug-output*
-                      (format *trace-output* "Depth ~A~%" depth))
+                 for depth = (v. (the dvec3 facet-normal)
+                                 (!v- temp vertex (the dvec3 facet-centroid)))
                  always (<= depth eps))))))
 
 ;;; This version assumes that VERTEX is within the bounding box of
@@ -176,7 +177,7 @@
                                                       ;; hull. Chose the offset large enough so handle an edge that is
                                                       ;; almost coplanar to the hull facet (assume 1° incidence angle
                                                       ;; as the worst case).
-                                                      (let* ((threshold -1e-2)
+                                                      (let* ((threshold -1d-2)
                                                              (diff      (v- v2 v1))
                                                              (delta     (v* diff (min .5 (* 1.5
                                                                                             (/ (sin (/ pi 180)))
