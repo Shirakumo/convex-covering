@@ -84,121 +84,97 @@
     (manifolds:f64
      vertices)))
 
-;;; TODO(jmoringe): rename indices -> faces
-(defun decompose (vertices indices &key (merge-cost #'/compactness)
-                                        (tolerance         1d-4)
-                                        (edge-tolerance    tolerance)
-                                        (normals-tolerance 1d-4 #+TODO tolerance))
-  (check-input vertices indices)
-  ;; FIXME: This is all really dumb and uses really bad data structures
-  ;;        Could definitely be optimised a lot by someone smarter
+(defun decompose (vertices faces &key (merge-cost #'/compactness)
+                                      (tolerance         1d-4)
+                                      (edge-tolerance    tolerance)
+                                      (normals-tolerance 1d-4 #+TODO tolerance))
+  (check-input vertices faces)
   (let* ((vertex-component-type (determine-vertex-component-type vertices))
          (vertices (coerce-input vertices vertex-component-type))
-         (context (make-context vertices indices (coerce-to-cost-function merge-cost)
+         (context (make-context vertices faces (coerce-to-cost-function merge-cost)
                                 :edge-tolerance    (coerce edge-tolerance 'double-float)
                                 :normals-tolerance (coerce normals-tolerance 'double-float)))
          (patches (make-hash-table :test 'eq))
          (links (make-hash-table :test 'eq))
          (merge-queue (damn-fast-priority-queue:make-queue)))
     ;; 1. Destructure the mesh into one patch per face
-    (let ((patchlist (make-array (truncate (length indices) 3)))
+    (let ((patchlist (make-array (truncate (length faces) 3)))
           (i 0))
-      (manifolds:do-faces (a b c indices)
+      (manifolds:do-faces (a b c faces)
         (let ((patch (make-initial-patch vertices a b c)))
           (setf (gethash patch patches) T)
           (setf (aref patchlist i) patch)
           (incf i)))
       ;; 2. Find neighbouring patches and create the links
       (let ((*debug-visualizations* NIL))
-        (let ((adjacents (manifolds:face-adjacency-list indices)))
+        (let ((adjacents (manifolds:face-adjacency-list faces)))
           (dotimes (face (length adjacents))
             (loop for other in (aref adjacents face)
                   for link = (link-patches context
                                            (aref patchlist face) (aref patchlist other))
                   when link
-                    do (setf (gethash link links) T)
-                       (let ((priority (merge-priority link)))
-                         (when priority
-                           (damn-fast-priority-queue:enqueue merge-queue link priority))))))))
-    ;; (visualize-step patches 0)
+                  do (setf (gethash link links) T) ; TODO(jmoringe): don't store if invalid?
+                     (let ((priority (merge-priority link)))
+                       (when priority
+                         (damn-fast-priority-queue:enqueue merge-queue link priority))))))))
     ;; 3. Greedily merge patches according to merge cost
-    (let ((i 1))
-      (unwind-protect
-           (loop for link = (progn
-                              (when (zerop (mod i 100))
-                                (format *trace-output* "--------Step ~:d | ~:d patch~:p ~:d link~:p~%"
-                                        i (hash-table-count patches) (hash-table-count links)))
-                              (next-link merge-queue links))
-                 while link   ; TODO for after while is not conforming
-                 for patch1 = (patch-link-a link)
-                 for patch2 = (patch-link-b link)
-                 for patch = (let ((*debug-visualizations* (debug-visualizations-p i)))
-                               (merge-patches context link))
-
-
-                 do (when (debug-visualizations-p i)
-                       ;; (valid-patch-p (patch-link-merge-result link) vertices indices)
-                       ;; (visualize-step patches i :highlight patch)
-                       )
-                     #+no (when (= i 10)
-                            (loop for link in (alexandria:hash-table-keys links)
-                                  for j from 0
-                                  unless (typep (patch-link-merge-result link) 'patch)
-                                  do (visualize-problem link i j)))
-
-                 do ;; 1. Remove old patches and links
-                    (assert (not (eq patch1 patch2)))
-                    (assert (remhash patch1 patches))
-                    (assert (remhash patch2 patches))
-                    (remhash link links)
-                    (flet ((remove-other-links (patch)
-                             (loop for other-link across (patch-links patch)
-                                        ; for other-patch = (link-other-patch other-link patch)
-                                   do (remhash other-link links)
-                                        ; (setf (patch-links other-patch) (remove other-link (patch-links other-patch)))
-                                   )))
-                      (remove-other-links patch1)
-                      (remove-other-links patch2))
-                    (d "  after removing ~:d patch~:p ~d link~:p~%"
-                       (hash-table-count patches) (hash-table-count links))
-                    ;; 2. Merge the patches
-                    (let (#+no (patch (let ((*debug-visualizations* (debug-visualizations-p i)))
-                                        (merge-patches vertices indices vertex-index link))))
-                      ;; 3. Insert the new links
-                      (assert (patch-hull patch))
-                      (setf (gethash patch patches) T)
-                      (loop for link across (patch-links patch)
-                            do (setf (gethash link links) T)
-                               (let ((priority (merge-priority link)))
-                                 (when priority
-                                   (damn-fast-priority-queue:enqueue merge-queue link priority)))))
-                 do                    ; consistency check
-                    #+no (let ((linked-patches (make-hash-table :test #'eq))
-                               (seen (make-hash-table :test #'eq)))
-                           ;; validate `links' vs patch-links for all patches
-                           (loop with worklist = (alexandria:hash-table-keys links)
-                                 for link = (pop worklist)
-                                 while link
-                                 do (unless (gethash link seen)
-                                      (setf (gethash link seen) T)
-                                      (setf (gethash (patch-link-a link) linked-patches) T
-                                            (gethash (patch-link-b link) linked-patches) T)
-                                      (setf worklist (nconc worklist
-                                                            (coerce (patch-links (patch-link-a link)) 'list)
-                                                            (coerce (patch-links (patch-link-b link)) 'list)))))
-                           (unless (alexandria:set-equal (alexandria:hash-table-keys patches)
-                                                         (alexandria:hash-table-keys linked-patches))
-                             (format *error-output* "~d patches ~d linked patches~%"
-                                     (hash-table-count patches)
-                                     (hash-table-count linked-patches)))
-                           (unless (= (hash-table-count patches) 1)
-                             (assert (alexandria:set-equal (alexandria:hash-table-keys patches)
-                                                           (alexandria:hash-table-keys linked-patches)))))
-                    (incf i)
-                 finally (format *trace-output* "--------Result | ~:d patch~:p ~:d link~:p~%"
-                                  (hash-table-count patches) (hash-table-count links)))
-        ;; (visualize-step (alexandria:hash-table-keys patches) i :final T)
-        ))
+    (flet ((report (step)
+             (format *trace-output* "-------- ~:[Result~;Step ~:*~:d~] | ~:d patch~:p ~:d link~:p~%"
+                     step (hash-table-count patches) (hash-table-count links))))
+      (loop with i = 1
+            for link = (progn
+                         (when (zerop (mod i 100)) (report i))
+                         (next-link merge-queue links))
+            while link        ; TODO for after while is not conforming
+            for patch1 = (patch-link-a link)
+            for patch2 = (patch-link-b link)
+            ;; a) Merge the patches
+            for patch = (let ((*debug-visualizations* (debug-visualizations-p i)))
+                          (merge-patches context link))
+            ;; b) Remove old patches and links
+            do (assert (not (eq patch1 patch2)))
+               (assert (remhash patch1 patches))
+               (assert (remhash patch2 patches))
+               (remhash link links)
+               (flet ((remove-other-links (patch)
+                        (loop for other-link across (patch-links patch)
+                              do (remhash other-link links))))
+                 (remove-other-links patch1)
+                 (remove-other-links patch2))
+               (d "  after removing ~:d patch~:p ~d link~:p~%"
+                  (hash-table-count patches) (hash-table-count links))
+               ;; c) Insert the new links
+               (assert (patch-hull patch))
+               (setf (gethash patch patches) T)
+               (loop for link across (patch-links patch)
+                     do (setf (gethash link links) T)
+                        (let ((priority (merge-priority link)))
+                          (when priority
+                            (damn-fast-priority-queue:enqueue merge-queue link priority))))
+            do ; consistency check
+               #+no (let ((linked-patches (make-hash-table :test #'eq))
+                          (seen (make-hash-table :test #'eq)))
+                      ;; validate `links' vs patch-links for all patches
+                      (loop with worklist = (alexandria:hash-table-keys links)
+                            for link = (pop worklist)
+                            while link
+                            do (unless (gethash link seen)
+                                 (setf (gethash link seen) T)
+                                 (setf (gethash (patch-link-a link) linked-patches) T
+                                       (gethash (patch-link-b link) linked-patches) T)
+                                 (setf worklist (nconc worklist
+                                                       (coerce (patch-links (patch-link-a link)) 'list)
+                                                       (coerce (patch-links (patch-link-b link)) 'list)))))
+                      (unless (alexandria:set-equal (alexandria:hash-table-keys patches)
+                                                    (alexandria:hash-table-keys linked-patches))
+                        (format *error-output* "~d patches ~d linked patches~%"
+                                (hash-table-count patches)
+                                (hash-table-count linked-patches)))
+                      (unless (= (hash-table-count patches) 1)
+                        (assert (alexandria:set-equal (alexandria:hash-table-keys patches)
+                                                      (alexandria:hash-table-keys linked-patches)))))
+               (incf i)
+            finally (report nil)))
     ;; 4. Return the patches' convex hulls
     (loop with hulls = (make-array (hash-table-count patches))
           for i from 0
