@@ -306,39 +306,97 @@
   (or (eq (patch-link-a link) patch)
       (eq (patch-link-b link) patch)))
 
+(defun emit-do-results (ordered)
+  (do-results ((result) &body body)
+    (loop repeat task-count
+          for (new-link cur patch2) = (lparallel:receive-result channel)
+          do (unless (find-link-involving patch2 new-patch)
+               (push-link new-link new-patch))
+             (let ((temp (remove-if (lambda (old-link)
+                                      ;; (assert (not (link-involves-p new-patch old-link)))
+                                      (when (eq old-link link)
+                                        (assert (link-involves-p cur old-link)))
+                                      (link-involves-p cur old-link))
+                                    (patch-links patch2))))
+               (setf (patch-links patch2)
+                     (make-array (length temp) :initial-contents temp :adjustable T :fill-pointer T)))
+             (unless (find-link-involving new-patch patch2)
+               (push-link new-link patch2)))))
+
+(defun expand-task (ordered channel task-count body)
+  (let ((nid (gensym "ID")))
+    `(progn
+       (let (,@(when ordered `((,nid ,task-count))))
+         (lparallel:submit-task
+          ,channel (lambda ()
+                     ,@(if ordered
+                           `((cons ,nid (progn ,@body)))
+                           body)))
+         (incf ,task-count)))))
+
+(defun expand-do-results (ordered channel task-count variable body)
+  (if ordered
+      (let ((nresults (gensym "RESULTS")))
+        `(let* ((,nresults (loop repeat ,task-count
+                                 collect (lparallel:receive-result ,channel)))
+                (,nresults (sort ,nresults #'< :key #'car)))
+           (mapc (lambda (,variable)
+                   (let ((,variable (cdr ,variable)))
+                     ,@body))
+                 ,nresults)))
+      `(loop repeat ,task-count
+             for ,variable = (lparallel:receive-result ,channel)
+             do (progn ,@body))))
+
+(defmacro with-tasks ((&key ordered) &body body)
+  (let ((nchannel (gensym "CHANNEL"))
+        (ntask-count (gensym "TASK-COUNT")))
+    `(let ((,nchannel (lparallel:make-channel))
+           (,ntask-count 0))
+       (macrolet ((task (&body body)
+                    (expand-task ',ordered ',nchannel ',ntask-count body))
+                  (do-results ((result) &body body)
+                    (expand-do-results ',ordered ',nchannel ',ntask-count result body)))
+         ,@body))))
+
 (defun merge-patches (context link)
   (let ((new-patch (patch-link-merge-result link)))
-    ;; Now that we actually merge this in, compute new links and update the existing neighbour's links.
-    (let ((channel (lparallel:make-channel))
-          (task-count 0))
+    ;; Now that we actually merge this in, compute new links and
+    ;; update the existing neighbour's links.
+    ;;
+    ;; We perform the expensive part, computation of new patches,
+    ;; their hulls and the validity, in parallel. We use :ordered t to
+    ;; guarantee the same result as a serial computation would
+    ;; produce. This matters because the overall result depends on the
+    ;; order in which patch links are updated.
+    (with-tasks (:ordered t)
       (flet ((link (cur other)
                (loop with links = (patch-links cur)
                      for i from 0 below (length links)
                      for link = (aref links i)
                      do (unless (link-involves-p other link)
                           (let ((patch2 (link-other-patch link cur)))
-                            (incf task-count)
-                            (lparallel:submit-task
-                             channel (lambda ()
-                                       (list (make-patch-link context new-patch patch2)
-                                             cur
-                                             patch2))))))))
+                            (task
+                             (list (make-patch-link context new-patch patch2)
+                                   cur
+                                   patch2)))))))
+        ;; Submit tasks. Each task should compute a patch but not
+        ;; touch shared data, in particular patch links.
         (link (patch-link-a link) (patch-link-b link))
         (link (patch-link-b link) (patch-link-a link))
-
-        (loop repeat task-count
-              for (new-link cur patch2) = (lparallel:receive-result channel)
-              do (unless (find-link-involving patch2 new-patch)
-                   (push-link new-link new-patch))
-                 (let ((temp (remove-if (lambda (old-link)
-                                          ;; (assert (not (link-involves-p new-patch old-link)))
-                                          (when (eq old-link link)
-                                            (assert (link-involves-p cur old-link)))
-                                          (link-involves-p cur old-link))
-                                        (patch-links patch2))))
-                   (setf (patch-links patch2)
-                         (make-array (length temp) :initial-contents temp :adjustable T :fill-pointer T)))
-                 (unless (find-link-involving new-patch patch2)
-                   (push-link new-link patch2)))
-
+        ;; Collect results and update patch links.
+        (do-results (result)
+          (destructuring-bind (new-link cur patch2) result
+            (unless (find-link-involving patch2 new-patch)
+              (push-link new-link new-patch))
+            (let ((temp (remove-if (lambda (old-link)
+                                     ;; (assert (not (link-involves-p new-patch old-link)))
+                                     (when (eq old-link link)
+                                       (assert (link-involves-p cur old-link)))
+                                     (link-involves-p cur old-link))
+                                   (patch-links patch2))))
+              (setf (patch-links patch2)
+                    (make-array (length temp) :initial-contents temp :adjustable T :fill-pointer T)))
+            (unless (find-link-involving new-patch patch2)
+              (push-link new-link patch2))))
         new-patch))))
