@@ -24,6 +24,7 @@
                "3d-spaces"
                "quickhull"
                "damn-fast-priority-queue"
+               "lparallel"
                "documentation-utils"
 
                "cl-wavefront") ; TODO(jmoringe): temporary for debugging

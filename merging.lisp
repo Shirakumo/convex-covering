@@ -238,6 +238,9 @@
     (setf (hull-problem hull) :edge)
     T))
 
+;; TODO per-thread?
+(defvar *global-cache-lock* (bt:make-lock))
+
 (defun hull-edge-index (hull)
   (let ((global-faces (hull-global-faces hull))
         (index (make-hash-table :test #'eql)))
