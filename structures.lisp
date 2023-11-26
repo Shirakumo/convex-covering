@@ -13,7 +13,7 @@
 ;;; 2. Stores additional information such as normals and bounding boxes
 
 (defstruct (hull
-            (:constructor %make-hull (vertices facets global-faces))
+            (:constructor %make-hull (vertices facets flat-p global-faces))
             (:copier NIL)
             (:predicate NIL))
   (vertices      (error "required") :type (manifolds:vertex-array manifolds:f64) :read-only T)
@@ -21,12 +21,13 @@
   (facet-normals '())
   (bounding-box  NIL :type (or null cons)) ; (location . size/2) ; TODO(jmoringe): maybe store 3d-space:region directly
   ;; Maybe essential
+  (flat-p        (error "required") :type boolean :read-only T)
   (global-faces  #() :type manifolds:face-array :read-only T)
   ;; Debugging
   (annotations   '() :type list)
   (problem       NIL))
 
-(defun make-hull (vertices faces vertex-position-index)
+(defun make-hull (vertices faces flat-p vertex-position-index)
   (let ((global-faces (make-array 0 :element-type 'manifolds:u32
                                     :adjustable T
                                     :fill-pointer 0)) ; TODO(jmoringe): remove adjust-ability before returning?
@@ -42,13 +43,15 @@
           (vector-push-extend a/gi global-faces)
           (vector-push-extend b/gi global-faces)
           (vector-push-extend c/gi global-faces))))
-    (%make-hull vertices faces (make-array (length global-faces)
-                                           :element-type 'manifolds:u32
-                                           :initial-contents global-faces))))
+    (%make-hull vertices faces flat-p (make-array (length global-faces)
+                                                  :element-type 'manifolds:u32
+                                                  :initial-contents global-faces))))
 
-(defun hull-flat-p (hull &key (threshold .005))
+#+TODO-unused
+(defun hull-flat-p* (hull &key (threshold .005))
   (let ((vertices (hull-vertices hull))
         (faces (hull-facets hull)))
+    (assert (not (= (length vertices) (* 3 3))))
     (or (<= (length vertices) (* 3 3))
         ;; For computing the normal and "reference point", find the
         ;; face with the largest area to hopefully reduce numerical
@@ -179,9 +182,9 @@
                (vector-push-extend y vertices)
                (vector-push-extend z vertices))
              (vector-push-extend j global-faces))
-    (multiple-value-call #'make-hull
-      (org.shirakumo.fraf.quickhull:convex-hull vertices)
-      vertex-position-index)))
+    (multiple-value-bind (vertices faces extruded-p)
+        (org.shirakumo.fraf.quickhull:convex-hull vertices)
+      (make-hull vertices faces extruded-p vertex-position-index))))
 
 (defun push-link (new-link patch)
   #+assertions (assert (or (eq patch (patch-link-a new-link))
@@ -234,8 +237,8 @@
       (unless (= (length faces) (+ (length faces1) (length faces2))) ; TODO(jmoringe) still needed?
         (setf surface-area (manifolds:surface-area all-vertices faces)))
       (let* ((hull (compute-patch-convex-hull all-vertices faces (context-vertex-position-index context)))
-             (patch (%make-patch faces surface-area hull)))
-        (cond ((valid-patch-p patch context)
+             (patch (when hull (%make-patch faces surface-area hull))))
+        (cond ((and patch (valid-patch-p patch context))
                (setf (patch-compactness patch) (compute-compactness all-vertices patch))
                patch)
               (T
