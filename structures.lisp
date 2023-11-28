@@ -162,7 +162,6 @@
          ;; Quickhull doesn't like duplicate vertices so we take case
          ;; of those here.
          (vertices (make-array 3 :element-type 'manifolds:f64 :adjustable T :fill-pointer 0))
-         (global-faces (make-array 3 :element-type 'manifolds:u32 :adjustable T :fill-pointer 0))
          (seen (make-hash-table :test #'equal)))
     (loop for i below vertex-count
           for j = (aref faces i)
@@ -180,8 +179,7 @@
                                           :thereis (v= v (dvec x y z))))
                (vector-push-extend x vertices)
                (vector-push-extend y vertices)
-               (vector-push-extend z vertices))
-             (vector-push-extend j global-faces))
+               (vector-push-extend z vertices)))
     (multiple-value-bind (vertices faces extruded-p)
         (org.shirakumo.fraf.quickhull:convex-hull vertices)
       (make-hull vertices faces extruded-p vertex-position-index))))
