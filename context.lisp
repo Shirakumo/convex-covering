@@ -82,6 +82,12 @@
 (defmethod space:bsize ((object edge-info))
   (edge-info-size/2 object))
 
+(declaim (inline edge-key))
+(defun edge-key (i1 i2)
+  (if (< i1 i2)
+      (logior (ash i1 32) i2)
+      (logior (ash i2 32) i1)))
+
 (defun index-edges (vertices faces)
   (check-type vertices manifolds:vertex-array)
   (check-type faces manifolds:face-array)
@@ -96,9 +102,7 @@
       (loop for edge across (manifolds:edge-list faces)
             for i1 = (manifolds:start edge)
             for i2 = (manifolds:end edge)
-            for key = (if (< i1 i2) ; TODO(jmoringe): make a function
-                          (logior (ash i1 32) i2)
-                          (logior (ash i2 32) i1))
+            for key = (edge-key i1 i2)
             for v1 = (manifolds:v vertices i1)
             for v2 = (manifolds:v vertices i2)
             do (add-edge key v1 v2)))

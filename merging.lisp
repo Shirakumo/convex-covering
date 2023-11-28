@@ -242,9 +242,7 @@
   (let ((global-faces (hull-global-faces hull))
         (index (make-hash-table :test #'eql)))
     (flet ((edge (from to)
-             (let ((key (if (< from to)
-                            (logior (ash from 32) to)
-                            (logior (ash to   32) from))))
+             (let ((key (edge-key from to)))
                (setf (gethash key index) T))))
       (loop for i below (length global-faces) by 3
             for a = (aref global-faces (+ i 0))
