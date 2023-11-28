@@ -30,8 +30,7 @@
 (defun make-hull (vertices faces flat-p vertex-position-index)
   (let ((global-faces (make-array 0 :element-type 'manifolds:u32
                                     :adjustable T
-                                    :fill-pointer 0)) ; TODO(jmoringe): remove adjust-ability before returning?
-        )
+                                    :fill-pointer 0)))
     (manifolds:do-faces (a/li b/li c/li faces)
       (let* ((a    (manifolds:v vertices a/li))
              (a/gi (vertex-position a vertex-position-index))
@@ -43,9 +42,10 @@
           (vector-push-extend a/gi global-faces)
           (vector-push-extend b/gi global-faces)
           (vector-push-extend c/gi global-faces))))
-    (%make-hull vertices faces flat-p (make-array (length global-faces)
-                                                  :element-type 'manifolds:u32
-                                                  :initial-contents global-faces))))
+    (let ((global-faces (make-array (length global-faces)
+                                    :element-type 'manifolds:u32
+                                    :initial-contents global-faces)))
+      (%make-hull vertices faces flat-p global-faces))))
 
 #+TODO-unused
 (defun hull-flat-p* (hull &key (threshold .005))
