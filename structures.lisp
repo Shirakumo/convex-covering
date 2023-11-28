@@ -158,31 +158,31 @@
     (%make-patch faces surface-area)))
 
 (defun compute-patch-convex-hull (all-vertices faces vertex-position-index)
-  (let* ((vertex-count (length faces))
-         ;; Quickhull doesn't like duplicate vertices so we take case
-         ;; of those here.
-         (vertices (make-array 3 :element-type 'manifolds:f64 :adjustable T :fill-pointer 0))
-         (seen (make-hash-table :test #'equal)))
-    (loop for i below vertex-count
-          for j = (aref faces i)
-          for a = (+ (* 3 j) 0) ; global vertex indices
-          for b = (+ (* 3 j) 1)
-          for c = (+ (* 3 j) 2)
-          for x = (aref all-vertices a) ; TODO can we use manifold:v?
-          for y = (aref all-vertices b)
-          for z = (aref all-vertices c)
-          for key = (list x y z)
+  (let ((vertices (make-array 3 :element-type 'manifolds:f64
+                                :adjustable T
+                                :fill-pointer 0)))
+    ;; Quickhull doesn't like duplicate vertices so we take care of
+    ;; those here.
+    (loop with seen = (make-hash-table :test #'equal)
+          for j across faces
+          for a of-type manifolds:u32 = (+ (* 3 j) 0) ; global vertex indices
+          for b of-type manifolds:u32 = (+ (* 3 j) 1)
+          for c of-type manifolds:u32 = (+ (* 3 j) 2)
+          for key = (cons (logior (ash a 32) b) c)
           do (unless (gethash key seen)
                (setf (gethash key seen) T)
-               #+assertions (assert (loop :for k :below (/ (length all-vertices) 3)
-                                          :for v = (manifolds:v all-vertices k)
-                                          :thereis (v= v (dvec x y z))))
-               (vector-push-extend x vertices)
-               (vector-push-extend y vertices)
-               (vector-push-extend z vertices)))
-    (multiple-value-bind (vertices faces extruded-p)
-        (org.shirakumo.fraf.quickhull:convex-hull vertices)
-      (make-hull vertices faces extruded-p vertex-position-index))))
+               (let ((x (aref all-vertices a))
+                     (y (aref all-vertices b))
+                     (z (aref all-vertices c)))
+                 (vector-push-extend x vertices)
+                 (vector-push-extend y vertices)
+                 (vector-push-extend z vertices))))
+    ;; Make vertex array simple.
+    (let ((vertices (make-array (length vertices) :element-type 'manifolds:f64
+                                                  :initial-contents vertices)))
+      (multiple-value-bind (vertices faces extruded-p)
+          (org.shirakumo.fraf.quickhull:convex-hull vertices)
+        (make-hull vertices faces extruded-p vertex-position-index)))))
 
 (defun push-link (new-link patch)
   #+assertions (assert (or (eq patch (patch-link-a new-link))
