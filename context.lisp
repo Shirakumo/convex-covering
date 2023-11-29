@@ -197,16 +197,14 @@
 ;;; spatial index structures.
 
 (defstruct (context
-            (:constructor make-context (vertices faces cost-function
-                                        &key (edge-tolerance    1d-4)
-                                             (normals-tolerance 1d-4)
-                                        &aux (vertex-position-index (index-vertex-positions vertices))
-                                             (vertex-index          (index-vertices vertices))
-                                             (edge-index            (index-edges vertices faces))
-                                             (face-index            (index-faces vertices faces))
-                                             (boundary-edges        (manifolds:boundary-list faces))
-                                             (boundary-edge-index   (index-boundary-edges
-                                                                    vertices boundary-edges))))
+            (:constructor %make-context (vertices faces cost-function
+                                         edge-tolerance normals-tolerance
+                                         vertex-position-index
+                                         vertex-index
+                                         edge-index
+                                         face-index
+                                         boundary-edges
+                                         boundary-edge-index))
             (:predicate nil)
             (:copier nil))
   ;; Mesh
@@ -223,3 +221,23 @@
   (edge-index            (error "required") :read-only T)
   (face-index            (error "required") :read-only T)
   (boundary-edge-index   (error "required") :read-only T))
+
+(defun make-context (vertices faces cost-function
+                     &key (edge-tolerance    1d-4)
+                          (normals-tolerance 1d-4))
+  (maybe-plet ((vertex-position-index (index-vertex-positions vertices))
+               (vertex-index (index-vertices vertices))
+               (edge-index (index-edges vertices faces))
+               (face-index (index-faces vertices faces))
+               ((boundary-edges boundary-edge-index)
+                (let ((boundary-edges (manifolds:boundary-list faces)))
+                  (values boundary-edges
+                          (index-boundary-edges vertices boundary-edges)))))
+    (%make-context vertices faces cost-function
+                   edge-tolerance normals-tolerance
+                   vertex-position-index
+                   vertex-index
+                   edge-index
+                   face-index
+                   boundary-edges
+                   boundary-edge-index)))
