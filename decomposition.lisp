@@ -58,7 +58,7 @@
 (declaim (inline check-input))
 (defun check-input (vertices indices)
   (check-type vertices manifolds:vertex-array)
-  (check-type indices manifolds:face-array)
+  (check-type indices vector)
   (unless (zerop (mod (length indices) 3))
     (error "Total number of vertex indices in faces array is not a multiple of 3. Are all faces triangles?")))
 
@@ -82,7 +82,8 @@
                                (lambda (component) (coerce component 'manifolds:f64))
                                vertices))
                     (manifolds:f64
-                     vertices))))
+                     vertices)))
+        (faces (coerce faces 'manifolds:face-array)))
     (manifolds:normalize vertices faces :threshold normalization-threshold)))
 
 (defun decompose (vertices faces &key (merge-cost              #'/compactness)
