@@ -11,6 +11,8 @@
   :serial T
   :components ((:file "package")
 
+               (:file "parallelization")
+
                (:file "debug")
                (:file "geometry-debug")
 
@@ -24,6 +26,8 @@
                "3d-spaces"
                "quickhull"
                "damn-fast-priority-queue"
+               "lparallel"
+               "machine-state"
                "documentation-utils"
 
                "cl-wavefront") ; TODO(jmoringe): temporary for debugging
