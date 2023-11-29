@@ -294,30 +294,42 @@
 
 (defun merge-patches (context link)
   (let ((new-patch (patch-link-merge-result link)))
-    ;; Now that we actually merge this in, compute new links and update the existing neighbour's links.
-    (flet ((link (cur other)
-             (loop with links = (patch-links cur)
-                   for i from 0 below (length links)
-                   for link = (aref links i)
-                   do (unless (link-involves-p other link)
-                        (let* ((patch2 (link-other-patch link cur))
-                               (new-link (make-patch-link context new-patch patch2)))
-                          (unless (find-link-involving patch2 new-patch)
-                            (push-link new-link new-patch))
-                          (let ((temp (remove-if (lambda (old-link)
-                                        ; (assert (not (link-involves-p new-patch old-link)))
-                                                   (when (eq old-link link)
-                                                     (assert (link-involves-p cur old-link)))
-                                                   (link-involves-p cur old-link)
-                                                   ;; (link-involves-p other old-link)
-                                                   )
-                                                 (patch-links patch2))))
-                            (setf (patch-links patch2)
-                                  (make-array (length temp) :initial-contents temp :adjustable T :fill-pointer T)))
-                          (unless (find-link-involving new-patch patch2)
-                            (push-link new-link patch2))
-                          #+no (let ((j (position link (patch-links patch2))))
-                                 (setf (aref (patch-links patch2) j) new-link)))))))
-      (link (patch-link-a link) (patch-link-b link))
-      (link (patch-link-b link) (patch-link-a link))
-      new-patch)))
+    ;; Now that we actually merge this in, compute new links and
+    ;; update the existing neighbour's links.
+    ;;
+    ;; We perform the expensive part, computation of new patches,
+    ;; their hulls and the validity, in parallel. We use :ordered t to
+    ;; guarantee the same result as a serial computation would
+    ;; produce. This matters because the overall result depends on the
+    ;; order in which patch links are updated.
+    (with-tasks (:ordered t)
+      (flet ((link (cur other)
+               (loop with links = (patch-links cur)
+                     for i from 0 below (length links)
+                     for link = (aref links i)
+                     do (unless (link-involves-p other link)
+                          (let ((patch2 (link-other-patch link cur)))
+                            (task
+                             (list (make-patch-link context new-patch patch2)
+                                   cur
+                                   patch2)))))))
+        ;; Submit tasks. Each task should compute a patch but not
+        ;; touch shared data, in particular patch links.
+        (link (patch-link-a link) (patch-link-b link))
+        (link (patch-link-b link) (patch-link-a link))
+        ;; Collect results and update patch links.
+        (do-results (result)
+          (destructuring-bind (new-link cur patch2) result
+            (unless (find-link-involving patch2 new-patch)
+              (push-link new-link new-patch))
+            (let ((temp (remove-if (lambda (old-link)
+                                     ;; (assert (not (link-involves-p new-patch old-link)))
+                                     (when (eq old-link link)
+                                       (assert (link-involves-p cur old-link)))
+                                     (link-involves-p cur old-link))
+                                   (patch-links patch2))))
+              (setf (patch-links patch2)
+                    (make-array (length temp) :initial-contents temp :adjustable T :fill-pointer T)))
+            (unless (find-link-involving new-patch patch2)
+              (push-link new-link patch2))))
+        new-patch))))
