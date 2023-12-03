@@ -186,8 +186,15 @@
                 for i from 0
                 for patch being the hash-keys of patches
                 for hull = (patch-hull patch)
-                do (setf (aref hulls i) (when hull ; TODO(jmoringe): can we avoid storing those patches in the first place?
-                                          (let ((result (make-convex-hull-from-hull vertex-component-type hull)))
-                                            (setf (debug-info result) (list :hull hull :patch patch))
-                                            result)))
-                finally (return (values (remove nil hulls) context))))))))
+                ;; A patch may not have a hull if the patch never got
+                ;; merged. Compute those missing hulls now.
+                do (setf (aref hulls i)
+                         (let ((hull (or hull
+                                         (compute-patch-convex-hull
+                                          vertices
+                                          (patch-faces patch)
+                                          (context-vertex-position-index context)))))
+                           (let ((result (make-convex-hull-from-hull vertex-component-type hull)))
+                             (setf (debug-info result) (list :hull hull :patch patch))
+                             result)))
+                finally (return (values hulls context))))))))
