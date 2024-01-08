@@ -45,6 +45,7 @@
   (let ((convex-covering::*debug-output* output)
         (convex-covering::*debug-visualizations* visualization))
     (let ((outdir (merge-pathnames (make-pathname :directory '(:relative "test" "output")) *here*)))
+      (ensure-directories-exist outdir)
       (dolist (in (directory (obj-file (make-pathname :name name #+no :wild))))
         (let ((out (make-pathname :name (pathname-name in) :type "obj" :defaults outdir)))
           (time (decompose-file in out)))))))
