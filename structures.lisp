@@ -234,7 +234,14 @@
     (let ((all-vertices (context-vertices context)))
       (unless (= (length faces) (+ (length faces1) (length faces2))) ; TODO(jmoringe) still needed?
         (setf surface-area (manifolds:surface-area all-vertices faces)))
-      (let* ((hull (compute-patch-convex-hull all-vertices faces (context-vertex-position-index context)))
+      (let* ((hull (block nil
+                     (handler-bind
+                         ((org.shirakumo.fraf.quickhull:points-colinear-error
+                            (lambda (error)
+                              (warn "Could not compute hull: ~A" error)
+                              (return NIL))))
+                       (compute-patch-convex-hull
+                        all-vertices faces (context-vertex-position-index context)))))
              (patch (when hull (%make-patch faces surface-area hull))))
         (cond ((and patch (valid-patch-p patch context))
                (setf (patch-compactness patch) (compute-compactness all-vertices patch))
