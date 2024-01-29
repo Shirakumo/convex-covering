@@ -10,7 +10,16 @@
 (defun merge-priority (link)
   (let ((cost (patch-link-merge-cost link)))
     (unless (= cost most-positive-double-float)
-      (the (unsigned-byte 32) (floor cost 1/10000000)))))
+      ;; The multiplication factor 10000000 has been determined
+      ;; empirically. The MIN ensures that the result will actually
+      ;; fit into 32 bits. Taking the MIN will of course squash the
+      ;; differences between certain, high costs but those should end
+      ;; up at the end of the queue and thus not matter much .
+      (the (unsigned-byte 32)
+           (values (floor (min cost
+                               #.(coerce (/ #.(ash 1 30) #1=10000000)
+                                         'double-float))
+                          #.(/ 1 #1#)))))))
 
 (defun maybe-enqueue-link (link queue)
   (let ((priority (merge-priority link)))
