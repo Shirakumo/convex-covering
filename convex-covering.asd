@@ -25,7 +25,7 @@
                "3d-spaces"
                "quickhull"
                "damn-fast-priority-queue"
-               "lparallel"
+               (:feature :convex-covering-with-lparallel "lparallel")
                "machine-state"
                "documentation-utils")
   :in-order-to ((asdf:test-op (asdf:test-op "convex-covering/test"))))
