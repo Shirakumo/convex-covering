@@ -14,7 +14,6 @@
                (:file "parallelization")
 
                (:file "debug")
-               (:file "geometry-debug")
 
                (:file "geometry")
                (:file "context")
@@ -28,9 +27,7 @@
                "damn-fast-priority-queue"
                "lparallel"
                "machine-state"
-               "documentation-utils"
-
-               "cl-wavefront") ; TODO(jmoringe): temporary for debugging
+               "documentation-utils")
   :in-order-to ((asdf:test-op (asdf:test-op "convex-covering/test"))))
 
 (defsystem "convex-covering/test"
@@ -50,6 +47,7 @@
                "inferior-shell"
 
                "convex-covering")
-  :serial t
-  :components ((:file "export-hulls")
+  :serial T
+  :components ((:file "geometry-debug")
+               (:file "export-hulls")
                (:file "visualization")))
