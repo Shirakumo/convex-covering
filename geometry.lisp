@@ -38,6 +38,11 @@
 
 ;;; Intersections via Separating Axis Theorem
 
+(defmacro <=~ (tolerance &rest numbers)
+  `(and ,@(loop :for (number1 number2) :on numbers
+                :while number2
+                :collect `(<= (- ,number1 ,number2) ,tolerance))))
+
 (defun intervals-intersect-p (i1-min i1-max i2-min i2-max &key (tolerance 1d-6) (threshold 1d-6))
   (declare (type double-float i1-min i1-max i2-min i2-max)
            (optimize (speed 3)))
@@ -51,11 +56,11 @@
         (threshold (coerce threshold 'double-float)))
     (cond ((<= (abs (- (min i1-min i2-min) (max i1-max i2-max))) threshold)
            (values T :identical))
-          ((<= i1-min i2-min i1-max i2-max) ; case 2
+          ((<=~ tolerance i1-min i2-min i1-max i2-max) ; case 2
            (d "~4@TOverlap ~A~%"
               (abs (- i2-min i1-max)))
            (values T (if (<= (- i1-max i2-min) tolerance) :touching :penetrating)))
-          ((<= i1-min i2-min i2-max i1-max) ; case 3
+          ((<=~ tolerance i1-min i2-min i2-max i1-max) #+no (<= i1-min i2-min i2-max i1-max) ; case 3
            (d "~4@TI₂ ⊂ I₁ (case 3) Overlaps ~A ~A | threshold ~A~%"
               (abs (- i1-min i2-min))   ; cases 3 4
               (abs (- i1-max i2-max))   ; cases 3 4
@@ -65,7 +70,7 @@
                                   (< (- i1-max i2-min) tolerance)))
                          :touching
                          :penetrating)))
-          ((<= i2-min i1-min i1-max i2-max) ; case 4
+          ((<=~ tolerance i2-min i1-min i1-max i2-max) ; case 4
            (d "~4@TI₁ ⊂ I₂ (case 4) Overlaps ~A ~A~%"
               (abs (- i1-min i2-min))   ; cases 3 4
               (abs (- i1-max i2-max))   ; cases 3 4
@@ -75,7 +80,7 @@
                                   (< (- i2-max i1-min) tolerance)))
                          :touching
                          :penetrating)))
-          ((<= i2-min i1-min i2-max i1-max) ; case 5
+          ((<=~ tolerance i2-min i1-min i2-max i1-max) ; case 5
            (d "~4@TOverlap ~A~%"
               (abs (- i1-min i2-max)))
            (values T (if (< (- i2-max i1-min) tolerance) :touching :penetrating)))
@@ -107,7 +112,7 @@
                   (iv-max (max dv1 dv2 dv3)))
              (d "~2@TAxis~@[ ~A~] ~A~&~
                  ~4@T=> {~5,2F ~5,2F ~5,2F} {~5,2F ~5,2F ~5,2F}~&~
-                 ~4@T=> [~5,2F, ~5,2F] [~5,2F, ~5,2F]~%"
+                 ~4@T=> [~9,6F, ~9,6F] [~9,6F, ~9,6F hi]~%"
                 note axis
                 du1 du2 du3 dv1 dv2 dv3
                 iu-min iu-max iv-min iv-max)
@@ -196,7 +201,7 @@
                   (iv-max (max dl1 dl2)))
              (d "~2@TAxis~@[ ~A~] ~A~&~
                  ~4@T=> {~5,2F ~5,2F ~5,2F} {~5,2F ~5,2F}~&~
-                 ~4@T=> [~5,2F, ~5,2F] [~5,2F, ~5,2F]~%"
+                 ~4@T=> [~9,6F, ~9,6F] [~9,6F, ~9,6F]~%"
                 NIL axis
                 du1 du2 du3 dl1 dl2
                 iu-min iu-max iv-min iv-max)
