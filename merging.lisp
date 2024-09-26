@@ -301,13 +301,35 @@
                              ;; face are coplanar, this is not a problem since the two may just
                              ;; be parts of different triangulations of a non-triangle mesh face.
                              ;; Other forms of penetrating contact make the hull invalid.
-                             (not (eq constellation :coplanar)))))
+                             (case constellation
+                               (:coplanar
+                                (let ((v1-good NIL)
+                                      (v2-good NIL))
+                                  ;; each endpoint "on" same hull face.
+                                  (manifolds:do-faces (ai bi ci hull-facets T)
+                                    (let* ((a (manifolds:v hull-vertices ai))
+                                           (b (manifolds:v hull-vertices bi))
+                                           (c (manifolds:v hull-vertices ci)))
+                                      (when (and (not v1-good)
+                                                 (point-on-triangle-p
+                                                  a b c v1 :threshold 1d-6))
+                                        (when v2-good
+                                          (return NIL))
+                                        (setf v1-good T))
+                                      (when (and (not v2-good)
+                                                 (point-on-triangle-p
+                                                  a b c v2 :threshold 1d-6))
+                                        (when v1-good
+                                          (return NIL))
+                                        (setf v2-good T))))))
+                               (T
+                                T)))))
                  (when (member :edges *debug-visualizations*)
                    (push (list :triangle a b c :color '(1 .5 0))
                          (hull-annotations hull))
                    (push (list :line v1 v2 :color '(1 0 .5))
                          (hull-annotations hull)))
-                 (return-from check-pair T)))))
+                 T))))
       (block all-faces
         (let ((min       (dvec3))
               (max       (dvec3))
