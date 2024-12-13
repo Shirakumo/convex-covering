@@ -44,12 +44,13 @@
 ;;; Interface
 
 (defstruct (convex-hull
-            (:constructor make-convex-hull (vertices faces))
+            (:constructor make-convex-hull (vertices faces flat-p))
             (:conc-name NIL)
             (:copier NIL)
             (:predicate NIL))
   (vertices (error "required") :type manifolds:vertex-array :read-only T)
   (faces    (error "required") :type manifolds:face-array :read-only T)
+  (flat-p   (error "required") :type boolean :read-only T)
   (debug-info))
 
 (defun make-convex-hull-from-hull (vertex-component-type hull)
@@ -61,8 +62,9 @@
                                 hull-vertices))
                      (manifolds:f64
                       hull-vertices)))
-         (faces (hull-facets hull)))
-    (make-convex-hull vertices faces)))
+         (faces (hull-facets hull))
+         (flat-p (hull-flat-p hull)))
+    (make-convex-hull vertices faces flat-p)))
 
 (declaim (inline check-input))
 (defun check-input (vertices indices)
@@ -207,7 +209,9 @@
                                (let ((result (make-convex-hull-from-hull vertex-component-type hull)))
                                  (setf (debug-info result) (list :hull hull :patch patch))
                                  result))
-                           (org.shirakumo.fraf.quickhull:points-colinear-error (condition)
+                           ((or org.shirakumo.fraf.quickhull:points-colinear-error
+                                org.shirakumo.fraf.quickhull:points-not-distinct-error)
+                               (condition)
                              (warn "Bad hull: ~A" condition)
                              nil)))
                 finally (return (values (remove nil hulls) context))))))))

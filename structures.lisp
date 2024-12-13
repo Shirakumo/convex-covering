@@ -180,9 +180,32 @@
     ;; Make vertex array simple.
     (let ((vertices (make-array (length vertices) :element-type 'manifolds:f64
                                                   :initial-contents vertices)))
-      (multiple-value-bind (vertices faces extruded-p)
-          (org.shirakumo.fraf.quickhull:convex-hull vertices)
-        (make-hull vertices faces extruded-p vertex-position-index)))))
+      ;; First try to find extreme vertices than span a volume. If the
+      ;; point cloud is flat, choose a different representation based
+      ;; on 2D convex hull computed by the gift wrapping algorithm
+      ;; (for now).
+      (multiple-value-bind (base-a base-b base-c base-d plane)
+          (let ((extrema (org.shirakumo.fraf.quickhull::compute-extrema vertices)))
+            (org.shirakumo.fraf.quickhull::compute-base vertices extrema .00001d0))
+        (if (null base-d)
+            ;; TODO(jmoringe): do something better for the normal
+            (let ((normal (vunit (manifolds:face-normal all-vertices faces 0))))
+              (multiple-value-bind (vertices faces)
+                  (gift-wrap vertices
+                             (manifolds:v vertices base-a)
+                             (manifolds:v vertices base-b)
+                             (manifolds:v vertices base-c)
+                             normal)
+                (let ((hull (make-hull vertices faces t vertex-position-index)))
+                  (map nil (lambda (hn)
+                             (assert (< (abs (- (v. hn normal) 1)) .01)))
+                       (hull-facet-normals hull))
+                  hull)))
+            (multiple-value-bind (vertices faces extruded-p)
+                (org.shirakumo.fraf.quickhull:convex-hull
+                 vertices :eps 0 :extrude-if-flat NIL)
+              (assert (not extruded-p))
+              (make-hull vertices faces extruded-p vertex-position-index)))))))
 
 (defun push-link (new-link patch)
   #+assertions (assert (or (eq patch (patch-link-a new-link))
@@ -236,7 +259,8 @@
         (setf surface-area (manifolds:surface-area all-vertices faces)))
       (let* ((hull (block nil
                      (handler-bind
-                         ((org.shirakumo.fraf.quickhull:points-colinear-error
+                         (((or org.shirakumo.fraf.quickhull:points-colinear-error
+                               org.shirakumo.fraf.quickhull:points-not-distinct-error)
                             (lambda (error)
                               (warn "Could not compute hull: ~A" error)
                               (return NIL))))

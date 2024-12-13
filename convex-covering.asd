@@ -15,6 +15,8 @@
 
                (:file "debug")
 
+               (:file "gift-wrapping")
+
                (:file "geometry")
                (:file "context")
                (:file "structures")
