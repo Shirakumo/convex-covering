@@ -42,7 +42,8 @@
 
 (defun one-triangle (vertices boundary flip)
   (let ((vertices* (make-array (* 3 3) :element-type 'double-float))
-        (faces (make-array 3 :initial-contents (if flip
+        (faces (make-array 3 :element-type 'manifolds:u32
+                             :initial-contents (if flip
                                                    '(0 1 2)
                                                    '(0 2 1)))))
     (loop for i from 0 below 3
@@ -58,7 +59,7 @@
   (let* ((count (floor (length vertices) 3))
          (centroid (v/ centroid count))
          (vertices* (make-array (* 3 (1+ (length boundary))) :element-type 'double-float))
-         (faces (make-array (* 3 (length boundary)))))
+         (faces (make-array (* 3 (length boundary)) :element-type 'manifolds:u32)))
     (setf (aref vertices* 0) (vx centroid)
           (aref vertices* 1) (vy centroid)
           (aref vertices* 2) (vz centroid))
