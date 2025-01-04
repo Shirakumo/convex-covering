@@ -60,18 +60,23 @@
 ;;; Merge validity
 
 (defun valid-patch-p (patch context)
-  (let ((valid
-          (handler-case
-              (let ((hull (patch-hull patch)))
-                (and ; (not (find-vertex-in-hull hull context))
-                     ; (not (find-edge-in-hull hull context))
-                     (not (find-edge-in-hull/edge-index hull context))
-                     (normals-matching-p patch hull context)
-                     (not (find-boundary-constraint-bar hull context))
-                     (not (find-negative-side-touching-triangle hull))))
-            (floating-point-invalid-operation (error)
-              (format *error-output* "~a~%" error)
-              NIL))))
+  (let ((valid (let ((hull (patch-hull patch)))
+                 (macrolet ((catch-invalid-operation (label &body forms)
+                              `(block nil
+                                 (handler-bind
+                                     ((floating-point-invalid-operation
+                                        (lambda (error)
+                                          (format *error-output* "In ~a: ~a~%" ',label error)
+                                          (return NIL))))
+                                   (progn ,@forms)))))
+                   (and (catch-invalid-operation
+                         find-edge-in-hull/edge-index (not (find-edge-in-hull/edge-index hull context)))
+                        (catch-invalid-operation
+                         normals-matching-p (normals-matching-p patch hull context))
+                        (catch-invalid-operation
+                         find-boundary-constraint-bar (not (find-boundary-constraint-bar hull context)))
+                        (catch-invalid-operation
+                         find-negative-side-touching-triangle (not (find-negative-side-touching-triangle hull))))))))
     (d "; hull ~a is ~:[invalid~;valid~]"
        (hull-global-faces (patch-hull patch)) valid)
     valid))
