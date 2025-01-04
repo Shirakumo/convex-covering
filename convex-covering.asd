@@ -18,6 +18,7 @@
                (:file "geometry")
                (:file "context")
                (:file "structures")
+               (:file "flat-mesh")
                (:file "merging")
                (:file "decomposition")
                (:file "documentation"))

@@ -7,4 +7,5 @@
    #:convex-hull
    #:vertices
    #:faces
+   #:flat-p
    #:decompose))
