@@ -425,7 +425,7 @@
                             for (facet-centroid . facet-normal) in (facet-normals hull)
                             always (if (and (< (abs (- -1 (v. face-normal (the dvec3 facet-normal)))) tolerance)
                                             (face-overlaps-or-matches-facet-p
-                                             hull-vertices hull-faces i a b c :threshold .0001 :hull hull))
+                                             hull-vertices hull-faces i a b c :threshold .001 :hull hull))
                                        (let ( ; (*debug-output* T)
                                              )
                                          (d "[~a ~a ~a] possibly intersects facet ~a~%"
