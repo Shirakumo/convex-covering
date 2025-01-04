@@ -299,7 +299,7 @@
                                (or (vertex-in-hull-p* (v+ v1 delta) hull :eps threshold)
                                    (vertex-in-hull-p* (v- v2 delta) hull :eps threshold))))
                             (:penetrating
-                             (when (member :edges *debug-visualizations*)
+                             #+no (when (member :edges *debug-visualizations*)
                                (push (list :line v1 v2 :color '(.2 .4 .4))
                                      (hull-annotations hull)))
                              ;; The edge is penetrating the hull face. If the edge and the hull
@@ -311,28 +311,44 @@
                                 (let ((v1-good NIL)
                                       (v2-good NIL))
                                   ;; each endpoint "on" same hull face.
-                                  (manifolds:do-faces (ai bi ci hull-facets T)
-                                    (let* ((a (manifolds:v hull-vertices ai))
-                                           (b (manifolds:v hull-vertices bi))
-                                           (c (manifolds:v hull-vertices ci)))
-                                      (when (and (not v1-good)
-                                                 (point-on-triangle-p
-                                                  a b c v1 :threshold 1d-6))
-                                        (when v2-good
-                                          (return NIL))
-                                        (setf v1-good T))
-                                      (when (and (not v2-good)
-                                                 (point-on-triangle-p
-                                                  a b c v2 :threshold 1d-6))
-                                        (when v1-good
-                                          (return NIL))
-                                        (setf v2-good T))))))
+                                  (let ((bad
+                                         (manifolds:do-faces (ai bi ci hull-facets T)
+                                           (let* ((a (manifolds:v hull-vertices ai))
+                                                  (b (manifolds:v hull-vertices bi))
+                                                  (c (manifolds:v hull-vertices ci)))
+                                             (when (and (not v1-good)
+                                                        (point-on-triangle-p
+                                                         a b c v1 :threshold 1d-2))
+                                               (when v2-good
+                                                 (return NIL))
+                                               (setf v1-good T))
+                                             (when (and (not v2-good)
+                                                        (point-on-triangle-p
+                                                         a b c v2 :threshold 1d-2))
+                                               (when v1-good
+                                                 (return NIL))
+                                               (setf v2-good T))))))
+                                    (when bad
+                                      #+no (let ((org.shirakumo.fraf.convex-covering::*debug-output* t))
+                                        (line-intersects-triangle-p a b c v1 v2 :threshold 1d-4 :tolerance tolerance))
+                                      (push (list :point v1 :color (if v1-good
+                                                                       '(0.0 1.0 0.0)
+                                                                       '(1.0 0.0 0.0)))
+                                            (hull-annotations hull))
+                                      (push (list :point v2 :color (if v2-good
+                                                                       '(0.0 1.0 0.0)
+                                                                       '(1.0 0.0 0.0)))
+                                            (hull-annotations hull))
+                                      #+no (format *trace-output*
+                                              "v1 ~A => ~A~%v2 ~A => ~A~%"
+                                              v1 v1-good v2 v2-good))
+                                    bad)))
                                (T
                                 T)))))
                  (when (member :edges *debug-visualizations*)
-                   (push (list :triangle a b c :color '(1 .5 0))
+                   (push (list :triangle a b c :color '(1 .25 0))
                          (hull-annotations hull))
-                   (push (list :line v1 v2 :color '(1 0 .5))
+                   (push (list :line v1 v2 :color '(1 0 .25))
                          (hull-annotations hull)))
                  T))))
       (block all-faces
@@ -397,11 +413,13 @@
             (c (manifolds:v all-vertices ic))
                                         ; (face-normal (vunit (vc (v- b a) (v- c a))))
             )
-           (when (member :normals *debug-visualizations*)
-             (push (list :triangle a b c) (hull-annotations hull))
-             (let ((face-centroid (v/ (v+ a b c) 3)))
-               (push (list :line face-centroid (v+ face-centroid (v* face-normal .3)))
-                     (hull-annotations hull))))
+           #+no (when (member :normals *debug-visualizations*)
+             (let ((color '(.2 .1 0)))
+               (push (list :triangle a b c :color color)
+                     (hull-annotations hull))
+               (let ((face-centroid (v/ (v+ a b c) 3)))
+                 (push (list :line face-centroid (v+ face-centroid (v* face-normal .3)) :color color)
+                       (hull-annotations hull)))))
 
            (when (not (loop for i below (/ (length hull-faces) 3)
                             for (facet-centroid . facet-normal) in (facet-normals hull)
@@ -412,30 +430,21 @@
                                              )
                                          (d "[~a ~a ~a] possibly intersects facet ~a~%"
                                             ia ib ic i)
-                                         (let ()
-                                           (when (member :normals *debug-visualizations*)
-                                        ; (debug-line* a b :face-edge hull)
-                                        ; (debug-line* b c :face-edge hull)
-                                        ; (debug-line* c a :face-edge hull)
+                                         (when (member :normals *debug-visualizations*)
+                                           (push (list :point facet-centroid :color '(.5 .5 1)) (hull-annotations hull))
+                                           (push (list :line facet-centroid (v+ facet-centroid facet-normal) :color '(.5 .5 1))
+                                                 (hull-annotations hull))
+                                           (let ((face-centroid (v/ (v+ a b c) 3)))
                                              (push (list :triangle a b c :color '(.5 1 .5))
                                                    (hull-annotations hull))
-                                             (let ((face-centroid (v/ (v+ a b c) 3)))
-                                               (push (list :point face-centroid :color '(.5 1 .5)) (hull-annotations hull))
-                                        ; (debug-line face-centroid (v* face-normal .3) :face-normal hull :sample-count 13)
-                                               ))
-                                           (d "~2@tface normal ~a~&~2@tfacet normal ~a~&~2@t=> ~a~%"
-                                              face-normal
-                                              facet-normal
-                                              (v. face-normal facet-normal))
-                                           (cond (T ; (< (abs (- -1 (v. face-normal facet-normal))) .0001)
-                                                  (when (member :normals *debug-visualizations*)
-                                                    (push (list :line facet-centroid face-normal :color '(.8 .8 0))
-                                                          (hull-annotations hull))
-                                                    (push (list :line facet-centroid facet-normal :color '(.8 .8 0))
-                                                          (hull-annotations hull)))
-                                                  NIL)
-                                                 (T
-                                                  T))))
+                                             (push (list :point face-centroid :color '(.5 1 .5)) (hull-annotations hull))
+                                             (push (list :line face-centroid (v+ face-centroid face-normal) :color '(.5 1 .5))
+                                                   (hull-annotations hull))))
+                                         (d "~2@tface normal ~a~&~2@tfacet normal ~a~&~2@t=> ~a~%"
+                                            face-normal
+                                            facet-normal
+                                            (v. face-normal facet-normal))
+                                         NIL)
                                        T)))
              (setf (hull-problem hull) :normals)
              (return NIL)))))))
