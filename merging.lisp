@@ -66,7 +66,7 @@
                                  (handler-bind
                                      ((floating-point-invalid-operation
                                         (lambda (error)
-                                          (format *error-output* "In ~a: ~a~%" ',label error)
+                                          (d "In ~a: ~a~%" ',label error)
                                           (return NIL))))
                                    (progn ,@forms)))))
                    (and (catch-invalid-operation
