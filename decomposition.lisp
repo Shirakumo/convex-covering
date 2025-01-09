@@ -136,8 +136,8 @@
                                  (damn-fast-priority-queue:enqueue merge-queue link priority))))))))
           ;; 3. Greedily merge patches according to merge cost
           (flet ((report (step)
-                   (format *trace-output* "-------- ~:[Result~;Step ~:*~:d~] | ~:d patch~:p ~:d link~:p~%"
-                           step (hash-table-count patches) (hash-table-count links))))
+                   (d "-------- ~:[Result~;Step ~:*~:d~] | ~:d patch~:p ~:d link~:p~%"
+                      step (hash-table-count patches) (hash-table-count links))))
             (loop with i = 1
                   for link = (progn
                                (when (zerop (mod i 100)) (report i))

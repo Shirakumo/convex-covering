@@ -18,5 +18,7 @@
 ;;; Debug output
 
 (defun d (format-control &rest format-arguments)
-  (when *debug-output*
-    (apply #'format *trace-output* format-control format-arguments)))
+  (case *debug-output*
+    ((NIL))
+    ((T) (apply #'format *trace-output* format-control format-arguments))
+    (T (apply #'format *debug-output* format-control format-arguments))))
