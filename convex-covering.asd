@@ -5,9 +5,9 @@
            "Jan Moringen <jmoringe@techfak.uni-bielefeld.de>")
   :maintainer "Yukari Hafner <shinmera@tymoon.eu>"
   :description "An algorithm for the computation of a convex hull covering set of a mesh"
-  :homepage "https://shirakumo.github.io/convex-covering/"
-  :bug-tracker "https://github.com/shirakumo/convex-covering/issues"
-  :source-control (:git "https://github.com/shirakumo/convex-covering.git")
+  :homepage "https://shirakumo.org/docs/convex-covering/"
+  :bug-tracker "https://shirakumo.org/project/convex-covering/issues"
+  :source-control (:git "https://shirakumo.org/project/convex-covering.git")
   :serial T
   :components ((:file "package")
 
